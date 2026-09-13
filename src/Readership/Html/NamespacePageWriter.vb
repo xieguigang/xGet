@@ -11,7 +11,7 @@ Public Class NamespacePageWriter
         Dim base$ = ctx.BaseUrl(ns.Url)
         Dim sb As New StringBuilder
 
-        sb.AppendLine($"<p class=""eyebrow""><b>NS</b> <span><a href=""{base}index.html"">Overview</a> / namespace</span></p>")
+        sb.AppendLine($"<p class=""eyebrow""><b>NS</b> <span>{ctx.NamespaceBreadcrumb(ns.Name, ns.Url, lastIsText:=True)}</span></p>")
         sb.AppendLine($"<h1 class=""headline"">{DocHtml.Escape(DocSiteContext.DisplayNamespace(ns.Name))}</h1>")
 
         sb.AppendLine("<div class=""meta"">")

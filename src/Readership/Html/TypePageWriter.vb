@@ -16,7 +16,7 @@ Public Class TypePageWriter
         Dim nsName$ = DocSiteContext.DisplayNamespace(t.ContainingNamespace.Name)
         Dim sb As New StringBuilder
 
-        sb.AppendLine($"<p class=""eyebrow""><b>TYPE</b> <span><a href=""{base}index.html"">Overview</a> / <a href=""{base}{t.ContainingNamespace.Url}"">{DocHtml.Escape(nsName)}</a></span></p>")
+        sb.AppendLine($"<p class=""eyebrow""><b>TYPE</b> <span>{ctx.NamespaceBreadcrumb(t.ContainingNamespace.Name, t.Url)} / <span class=""crumb on"">{DocHtml.Escape(DocHtml.DisplayTypeName(t.Name))}</span></span></p>")
         sb.AppendLine($"<h1 class=""headline"">{DocHtml.Escape(DocHtml.DisplayTypeName(t.Name))}</h1>")
 
         sb.AppendLine("<div class=""meta"">")
