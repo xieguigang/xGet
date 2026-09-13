@@ -1,0 +1,206 @@
+- generic [ref=f1e1]:
+  - banner [ref=f1e2]:
+    - link "nuget server logo nuget package server" [ref=f1e3] [cursor=pointer]:
+      - /url: index.html
+      - img "nuget server logo" [ref=f1e4]
+      - strong [ref=f1e5]: nuget
+      - generic [ref=f1e6]: package server
+    - navigation [ref=f1e7]:
+      - link "Packages" [ref=f1e8] [cursor=pointer]:
+        - /url: index.html
+      - link "Statistics" [ref=f1e9] [cursor=pointer]:
+        - /url: about.html
+      - link "Graphs" [ref=f1e10] [cursor=pointer]:
+        - /url: graph.html
+      - link "API Docs" [ref=f1e11] [cursor=pointer]:
+        - /url: docs/index.html
+      - link "Service Index" [ref=f1e12] [cursor=pointer]:
+        - /url: v3/index.json
+    - link "Back" [ref=f1e13] [cursor=pointer]:
+      - /url: index.html
+      - text: ↖
+  - main [ref=f1e14]:
+    - paragraph [ref=f1e15]:
+      - generic [ref=f1e16]: "01"
+      - generic [ref=f1e17]: Package — Nuget
+    - article [ref=f1e18]:
+      - generic [ref=f1e21]:
+        - heading "Nuget" [level=1] [ref=f1e123]
+        - paragraph
+      - generic [ref=f1e23]:
+        - generic [ref=f1e24]: Version 1.0.0
+        - generic [ref=f1e25]: Versions 1
+        - generic [ref=f1e26]: Downloads 0
+        - generic [ref=f1e27]: Published 2026-09-13
+      - generic [ref=f1e28]:
+        - generic [ref=f1e29]:
+          - text: API Documentation
+          - link "browse the api documentation →" [ref=f1e31] [cursor=pointer]:
+            - /url: /docs/Nuget/1.0.0/index.html
+        - generic [ref=f1e124]: 23 types · version 1.0.0
+      - generic [ref=f1e35]:
+        - paragraph [ref=f1e36]:
+          - generic [ref=f1e37]: "02"
+          - generic [ref=f1e38]: Manifest
+        - generic [ref=f1e39]:
+          - term [ref=f1e40]: Authors
+          - definition [ref=f1e41]: xieguigang,deepseek
+          - term [ref=f1e42]: Owners
+          - definition [ref=f1e43]: —
+          - term [ref=f1e44]: License
+          - definition [ref=f1e45]: —
+          - term [ref=f1e46]: License URL
+          - definition [ref=f1e47]: —
+          - term [ref=f1e48]: Project
+          - definition [ref=f1e49]: —
+          - term [ref=f1e50]: Repository
+          - definition [ref=f1e51]: —
+          - term [ref=f1e52]: Language
+          - definition [ref=f1e53]: —
+          - term [ref=f1e54]: Copyright
+          - definition [ref=f1e55]: —
+          - term [ref=f1e56]: License acceptance
+          - definition [ref=f1e57]: "false"
+      - generic [ref=f1e58]:
+        - paragraph [ref=f1e59]:
+          - generic [ref=f1e60]: "03"
+          - generic [ref=f1e61]: Tags
+        - generic [ref=f1e62]: —
+      - generic [ref=f1e64]:
+        - paragraph [ref=f1e65]:
+          - generic [ref=f1e66]: "04"
+          - generic [ref=f1e67]: Dependencies
+        - generic [ref=f1e126]:
+          - generic [ref=f1e127]: net10.0
+          - list [ref=f1e128]:
+            - listitem [ref=f1e129]:
+              - link "LINQ →" [ref=f1e130] [cursor=pointer]:
+                - /url: https://www.nuget.org/packages/LINQ
+              - generic [ref=f1e131]: 1.0.0
+              - generic [ref=f1e132]: nuget.org
+            - listitem [ref=f1e133]:
+              - link "Flute.Http →" [ref=f1e134] [cursor=pointer]:
+                - /url: https://www.nuget.org/packages/Flute.Http
+              - generic [ref=f1e135]: 1.0.0
+              - generic [ref=f1e136]: nuget.org
+            - listitem [ref=f1e137]:
+              - link "Fluteway →" [ref=f1e138] [cursor=pointer]:
+                - /url: https://www.nuget.org/packages/Fluteway
+              - generic [ref=f1e139]: 1.0.0
+              - generic [ref=f1e140]: nuget.org
+            - listitem [ref=f1e141]:
+              - link "Microsoft.VisualBasic.Data.Framework →" [ref=f1e142] [cursor=pointer]:
+                - /url: https://www.nuget.org/packages/Microsoft.VisualBasic.Data.Framework
+              - generic [ref=f1e143]: 5.0.9742.7537
+              - generic [ref=f1e144]: nuget.org
+            - listitem [ref=f1e145]:
+              - link "Microsoft.VisualBasic.DataMining.Framework →" [ref=f1e146] [cursor=pointer]:
+                - /url: https://www.nuget.org/packages/Microsoft.VisualBasic.DataMining.Framework
+              - generic [ref=f1e147]: 1.0.9742.7537
+              - generic [ref=f1e148]: nuget.org
+            - listitem [ref=f1e149]:
+              - link "Microsoft.VisualBasic.DataMining.UMAP →" [ref=f1e150] [cursor=pointer]:
+                - /url: https://www.nuget.org/packages/Microsoft.VisualBasic.DataMining.UMAP
+              - generic [ref=f1e151]: 5.0.9742.7537
+              - generic [ref=f1e152]: nuget.org
+            - listitem [ref=f1e153]:
+              - link "Microsoft.VisualBasic.Data.GraphTheory →" [ref=f1e154] [cursor=pointer]:
+                - /url: https://www.nuget.org/packages/Microsoft.VisualBasic.Data.GraphTheory
+              - generic [ref=f1e155]: 1.0.9742.7537
+              - generic [ref=f1e156]: nuget.org
+            - listitem [ref=f1e157]:
+              - link "Microsoft.VisualBasic.Math.Core →" [ref=f1e158] [cursor=pointer]:
+                - /url: https://www.nuget.org/packages/Microsoft.VisualBasic.Math.Core
+              - generic [ref=f1e159]: 5.0.9742.7537
+              - generic [ref=f1e160]: nuget.org
+            - listitem [ref=f1e161]:
+              - link "Microsoft.VisualBasic.Math.Randomizer →" [ref=f1e162] [cursor=pointer]:
+                - /url: https://www.nuget.org/packages/Microsoft.VisualBasic.Math.Randomizer
+              - generic [ref=f1e163]: 1.0.9742.7537
+              - generic [ref=f1e164]: nuget.org
+            - listitem [ref=f1e165]:
+              - link "Microsoft.VisualBasic.Runtime →" [ref=f1e166] [cursor=pointer]:
+                - /url: https://www.nuget.org/packages/Microsoft.VisualBasic.Runtime
+              - generic [ref=f1e167]: 10.5.9742.7537
+              - generic [ref=f1e168]: nuget.org
+            - listitem [ref=f1e169]:
+              - link "JSql →" [ref=f1e170] [cursor=pointer]:
+                - /url: https://www.nuget.org/packages/JSql
+              - generic [ref=f1e171]: 1.0.0
+              - generic [ref=f1e172]: nuget.org
+            - listitem [ref=f1e173]:
+              - link "Readership →" [ref=f1e174] [cursor=pointer]:
+                - /url: https://www.nuget.org/packages/Readership
+              - generic [ref=f1e175]: 1.0.0
+              - generic [ref=f1e176]: nuget.org
+      - generic [ref=f1e71]:
+        - paragraph [ref=f1e72]:
+          - generic [ref=f1e73]: "05"
+          - generic [ref=f1e74]: Description
+        - generic [ref=f1e75]: Package Description
+      - generic [ref=f1e76]:
+        - paragraph [ref=f1e77]:
+          - generic [ref=f1e78]: "06"
+          - generic [ref=f1e79]: Release Notes
+        - generic [ref=f1e80]: —
+      - generic [ref=f1e81]:
+        - paragraph [ref=f1e82]:
+          - generic [ref=f1e83]: "08"
+          - generic [ref=f1e84]: Versions
+        - table [ref=f1e178]:
+          - rowgroup [ref=f1e179]:
+            - row [ref=f1e180]:
+              - columnheader "Version" [ref=f1e181]
+              - columnheader "Downloads" [ref=f1e182]
+              - columnheader "Size" [ref=f1e183]
+              - columnheader "Published" [ref=f1e184]
+              - columnheader "Package" [ref=f1e185]
+          - rowgroup [ref=f1e186]:
+            - row [ref=f1e187]:
+              - cell "1.0.0" [ref=f1e188]
+              - cell "0" [ref=f1e190]
+              - cell "413.0 KB" [ref=f1e191]
+              - cell "2026-09-13" [ref=f1e192]
+              - cell [ref=f1e193]:
+                - link "download →" [ref=f1e194] [cursor=pointer]:
+                  - /url: http://localhost:8099/v3-flatcontainer/nuget/1.0.0/nuget.1.0.0.nupkg
+      - generic [ref=f1e88]:
+        - paragraph [ref=f1e89]:
+          - generic [ref=f1e90]: "09"
+          - generic [ref=f1e91]: Original nuspec
+        - group [ref=f1e92]:
+          - generic "show the raw nuspec manifest" [ref=f1e93] [cursor=pointer]
+      - generic [ref=f1e94]:
+        - paragraph [ref=f1e95]:
+          - generic [ref=f1e96]: "10"
+          - generic [ref=f1e97]: Daily Activity
+        - generic [ref=f1e99]:
+          - generic [ref=f1e100]: Downloads, page views & doc views
+          - generic [ref=f1e101]:
+            - button "7d" [active] [ref=f1e102] [cursor=pointer]
+            - button "30d" [ref=f1e103] [cursor=pointer]
+            - button "90d" [ref=f1e104] [cursor=pointer]
+        - generic [ref=f1e108]:
+          - generic [ref=f1e109]: Downloads (period) 0
+          - generic [ref=f1e110]: Page views (period) 2
+          - generic [ref=f1e111]: Doc views (period) 21
+          - generic [ref=f1e112]: Basis UTC day
+  - contentinfo [ref=f1e113]:
+    - generic [ref=f1e114]:
+      - link "Previous Packages" [ref=f1e115] [cursor=pointer]:
+        - /url: index.html
+        - generic [ref=f1e116]: Previous
+        - text: Packages
+      - link "Next Statistics" [ref=f1e117] [cursor=pointer]:
+        - /url: about.html
+        - generic [ref=f1e118]: Next
+        - text: Statistics
+    - generic [ref=f1e119]:
+      - link "nuget · experimental feed" [ref=f1e120] [cursor=pointer]:
+        - /url: https://github.com/xieguigang/xGet
+      - text: · powered by
+      - link "Fluteway" [ref=f1e121] [cursor=pointer]:
+        - /url: https://github.com/xieguigang/flute
+      - text: +
+      - link "JSql" [ref=f1e122] [cursor=pointer]:
+        - /url: https://github.com/xieguigang/JSql

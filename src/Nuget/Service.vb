@@ -547,7 +547,8 @@ Public Class Service
                 {"versions", stats.versions},
                 {"downloads", stats.downloads},
                 {"users", stats.users},
-                {"views", stats.views}
+                {"views", stats.views},
+                {"docViews", stats.docViews}
             }},
             {"topDownloads", top},
             {"recent", recent},
@@ -909,6 +910,7 @@ Public Class Service
             {"days", days},
             {"totalDownloads", activity.Sum(Function(a) a.downloads)},
             {"totalViews", activity.Sum(Function(a) a.views)},
+            {"totalDocViews", activity.Sum(Function(a) a.docViews)},
             {"points", activitySeries(activity, days)}
         })
     End Sub
@@ -926,6 +928,7 @@ Public Class Service
             {"days", days},
             {"totalDownloads", activity.Sum(Function(a) a.downloads)},
             {"totalViews", activity.Sum(Function(a) a.views)},
+            {"totalDocViews", activity.Sum(Function(a) a.docViews)},
             {"points", activitySeries(activity, days)}
         })
     End Sub
@@ -968,13 +971,15 @@ Public Class Service
                 points.Add(New Dictionary(Of String, Object) From {
                     {"day", day},
                     {"downloads", item.downloads},
-                    {"views", item.views}
+                    {"views", item.views},
+                    {"docViews", item.docViews}
                 })
             Else
                 points.Add(New Dictionary(Of String, Object) From {
                     {"day", day},
                     {"downloads", 0},
-                    {"views", 0}
+                    {"views", 0},
+                    {"docViews", 0}
                 })
             End If
         Next
@@ -1169,6 +1174,11 @@ Public Class Service
             res.WriteError(HTTP_RFC.RFC_NOT_FOUND, $"the api document was not found: {id} {version} {name}")
             Return
         End If
+
+        ' count the documentation page view of the current utc day. Only the per
+        ' package pages reach this point: the global documentation index is
+        ' served by the other routes and is not a part of any single package.
+        Call store.RecordDocView(id)
 
         Call writeHtml(res, html)
     End Sub

@@ -75,11 +75,15 @@ Public Class NugetStats
 
     ''' <summary>the accumulated number of package detail page views.</summary>
     Public Property views As Long
+
+    ''' <summary>the accumulated number of api documentation page views.</summary>
+    Public Property docViews As Long
 End Class
 
 ''' <summary>
 ''' one daily activity record of a package: how many package files were
-''' downloaded and how many package detail pages were viewed on a utc day.
+''' downloaded, how many package detail pages were viewed and how many api
+''' documentation pages were viewed on a utc day.
 ''' </summary>
 Public Class DailyActivity
     ''' <summary>the package id, always stored in its lower-case form.</summary>
@@ -90,6 +94,9 @@ Public Class DailyActivity
 
     Public Property downloads As Long
     Public Property views As Long
+
+    ''' <summary>the api documentation page views of the day.</summary>
+    Public Property docViews As Long
 End Class
 
 ''' <summary>
@@ -222,6 +229,13 @@ Public Class NugetStore
                 "  downloads INT DEFAULT 0," &
                 "  views INT DEFAULT 0" &
                 ") COMMENT='daily download and page view counters'")
+            Call engine.Execute(
+                "CREATE TABLE IF NOT EXISTS package_doc_activity (" &
+                "  id INT NOT NULL PRIMARY KEY," &
+                "  package_id VARCHAR(200) NOT NULL," &
+                "  day VARCHAR(20) NOT NULL," &
+                "  visits INT DEFAULT 0" &
+                ") COMMENT='daily api documentation page view counters'")
             Call engine.Execute(
                 "CREATE TABLE IF NOT EXISTS package_clusters (" &
                 "  id INT NOT NULL PRIMARY KEY," &
@@ -523,7 +537,8 @@ Public Class NugetStore
             .versions = all.Count,
             .downloads = all.Sum(Function(p) p.downloads),
             .users = ReadAllUsers().Count,
-            .views = ReadActivityRows().Sum(Function(a) a.views)
+            .views = ReadActivityRows().Sum(Function(a) a.views),
+            .docViews = ReadDocActivityRows().Sum(Function(a) a.docViews)
         }
     End Function
 
@@ -633,6 +648,20 @@ Public Class NugetStore
     End Sub
 
     ''' <summary>
+    ''' record one api documentation page view of the current utc day. It is
+    ''' called for the per package documentation pages only: the package index
+    ''' page (``/docs/{id}/{version}/index.html``) and the type content page
+    ''' (``/docs/{id}/{version}/{type}.html``). The global documentation index is
+    ''' not a part of any single package, so it is not counted.
+    ''' </summary>
+    ''' <param name="packageId">the viewed package id.</param>
+    Public Sub RecordDocView(packageId As String)
+        SyncLock sync
+            Call incrementDocActivity(packageId, DayKey())
+        End SyncLock
+    End Sub
+
+    ''' <summary>
     ''' read the daily activity of one package. the missing days are not filled
     ''' here; the controller expands the series before returning it to the web
     ''' client.
@@ -659,6 +688,21 @@ Public Class NugetStore
 
                 item.downloads += row.downloads
                 item.views += row.views
+            Next
+
+            ' merge the api documentation page views into the very same day series
+            For Each row As DailyActivity In ReadDocActivityRows()
+                If row.day < from OrElse Not String.Equals(row.package_id, key, StringComparison.Ordinal) Then
+                    Continue For
+                End If
+
+                Dim item As DailyActivity = Nothing
+                If Not aggregated.TryGetValue(row.day, item) Then
+                    item = New DailyActivity With {.package_id = key, .day = row.day}
+                    aggregated(row.day) = item
+                End If
+
+                item.docViews += row.docViews
             Next
         End SyncLock
 
@@ -689,9 +733,48 @@ Public Class NugetStore
                 item.downloads += row.downloads
                 item.views += row.views
             Next
+
+            ' merge the api documentation page views into the very same day series
+            For Each row As DailyActivity In ReadDocActivityRows()
+                If row.day < from Then
+                    Continue For
+                End If
+
+                Dim item As DailyActivity = Nothing
+                If Not aggregated.TryGetValue(row.day, item) Then
+                    item = New DailyActivity With {.day = row.day}
+                    aggregated(row.day) = item
+                End If
+
+                item.docViews += row.docViews
+            Next
         End SyncLock
 
         Return aggregated.Values.OrderBy(Function(a) a.day, StringComparer.Ordinal).ToList()
+    End Function
+
+    ''' <summary>
+    ''' read every daily api documentation page view row of the database.
+    ''' </summary>
+    Private Function ReadDocActivityRows() As List(Of DailyActivity)
+        Dim list As New List(Of DailyActivity)
+
+        SyncLock sync
+            Dim rs As ResultSet = query("SELECT package_id, day, visits FROM package_doc_activity")
+            If rs Is Nothing OrElse Not rs.IsQuery Then
+                Return list
+            End If
+
+            For Each row As Object() In rs.Rows
+                list.Add(New DailyActivity With {
+                    .package_id = toStr(row(0)).Trim().ToLowerInvariant(),
+                    .day = toStr(row(1)),
+                    .docViews = toLong(row(2))
+                })
+            Next
+        End SyncLock
+
+        Return list
     End Function
 
     ''' <summary>
@@ -750,6 +833,38 @@ Public Class NugetStore
             Call exec(
                 "INSERT INTO package_activity (id, package_id, day, downloads, views) VALUES (" &
                 $"{newId}, '{esc(key)}', '{esc(day)}', {downloads}, {views})")
+        End If
+    End Sub
+
+    ''' <summary>
+    ''' increment the api documentation page view counter of a (package, day) row,
+    ''' creating the row when the package has no documentation view recorded yet
+    ''' on that day.
+    ''' </summary>
+    ''' <param name="packageId">the package id.</param>
+    ''' <param name="day">the utc day key.</param>
+    Private Sub incrementDocActivity(packageId As String, day As String)
+        Dim key As String = If(packageId, "").Trim().ToLowerInvariant()
+
+        If key.StringEmpty OrElse day.StringEmpty Then
+            Return
+        End If
+
+        Dim id As Long = -1
+        Dim rs As ResultSet = query($"SELECT id FROM package_doc_activity WHERE package_id = '{esc(key)}' AND day = '{esc(day)}'")
+
+        If rs IsNot Nothing AndAlso rs.IsQuery AndAlso rs.Rows.Count > 0 Then
+            id = toLong(rs.Rows(0)(0))
+        End If
+
+        If id >= 0 Then
+            Call exec($"UPDATE package_doc_activity SET visits = visits + 1 WHERE id = {id}")
+        Else
+            Dim newId As Long = nextId("package_doc_activity")
+
+            Call exec(
+                "INSERT INTO package_doc_activity (id, package_id, day, visits) VALUES (" &
+                $"{newId}, '{esc(key)}', '{esc(day)}', 1)")
         End If
     End Sub
 

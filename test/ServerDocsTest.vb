@@ -51,6 +51,8 @@ Module ServerDocsTest
             Call Console.WriteLine($"stored   : {store.ReadPackageApiDocIndex(metadata.Id, metadata.Version).Count} index row(s)")
             Call Console.WriteLine($"versions : {String.Join(", ", store.GetPackageApiDocVersions(metadata.Id))}")
 
+            Dim activityOk As Boolean = checkDocActivity(store, metadata.Id)
+
             Dim config As NugetConfiguration = NugetConfiguration.FromConfig(
                 New Dictionary(Of String, String) From {{"template", template}})
 
@@ -72,7 +74,7 @@ Module ServerDocsTest
                 checkSidebar("package index", packageHtml) AndAlso
                 checkSidebar("type page    ", typeHtml)
 
-            Dim ok As Boolean = globalOk AndAlso packageOk AndAlso typeOk AndAlso navOk
+            Dim ok As Boolean = globalOk AndAlso packageOk AndAlso typeOk AndAlso navOk AndAlso activityOk
 
             Call Console.WriteLine()
             Call Console.WriteLine($"server docs validation: {If(ok, "PASS", "FAIL")}")
@@ -105,6 +107,26 @@ Module ServerDocsTest
         Call Console.WriteLine($"  {label}: {html.Length} bytes, shell={hasShell}, contains '{expected}'={hasText}, unresolved={unresolved}")
 
         Return hasShell AndAlso hasText AndAlso unresolved = 0
+    End Function
+
+    ''' <summary>
+    ''' the documentation page view counter must be tracked per package and per
+    ''' utc day, and it must be merged into the same day series as the package
+    ''' downloads / page views so that the web front end could chart it.
+    ''' </summary>
+    Private Function checkDocActivity(store As NugetStore, packageId As String) As Boolean
+        ' two views of the package documentation and one view of another package
+        Call store.RecordDocView(packageId)
+        Call store.RecordDocView(packageId)
+        Call store.RecordDocView("xdoc.other.package")
+
+        Dim packageDocViews As Long = store.GetPackageActivity(packageId, 1).Sum(Function(a) a.docViews)
+        Dim feedDocViews As Long = store.GetFeedActivity(1).Sum(Function(a) a.docViews)
+        Dim totalDocViews As Long = store.Stats().docViews
+
+        Call Console.WriteLine($"doc views : package={packageDocViews}, feed={feedDocViews}, total={totalDocViews}")
+
+        Return packageDocViews = 2 AndAlso feedDocViews = 3 AndAlso totalDocViews = 3
     End Function
 
     ''' <summary>

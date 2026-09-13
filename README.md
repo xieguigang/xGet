@@ -199,12 +199,12 @@ xGet batch    --server http://localhost:80 --email me@example.com --dir ./packag
 | GET | `/api/packages?q=&skip=&take=` | 包列表（分组到最新版本） |
 | GET | `/api/package/{id}` | 包详情（含版本列表、依赖、readme、聚类标签、api 文档入口 `docs`） |
 | GET | `/api/package/{id}/{version}` | 指定版本详情 |
-| GET | `/api/stats` | 总览统计 + Top 下载 + 最近发布 |
+| GET | `/api/stats` | 总览统计（含 `views` 页面浏览与 `docViews` 文档访问累计）+ Top 下载 + 最近发布 |
 | GET | `/api/tag/{tag}?skip=&take=` | 按 tag 查包 |
 | GET | `/api/icon/{id}` | 包内图标 |
 | GET | `/api/readme/{id}`、`/api/readme/{id}/{version}` | README 原文（`text/markdown`） |
-| GET | `/api/activity/package/{id}?days=30` | 该包每日下载/访问量（补零连续序列） |
-| GET | `/api/activity/feed?days=30` | 全站每日下载/访问量 |
+| GET | `/api/activity/package/{id}?days=30` | 该包每日下载量 / 详情页访问量 / 文档访问量（补零连续序列，含 `totalDocViews`） |
+| GET | `/api/activity/feed?days=30` | 全站每日下载量 / 访问量 / 文档访问量（含 `totalDocViews`） |
 | GET | `/api/stats/tags` | 标签分布 |
 | GET | `/api/stats/tag-network` | 共享标签关系网络 |
 | GET | `/api/stats/dependency-network` | nuspec 依赖网络 |
@@ -221,6 +221,11 @@ xGet batch    --server http://localhost:80 --email me@example.com --dir ./packag
 三个页面均由服务端从 `package_api_docs` 表重建文档模型后渲染，返回最终 html（伪静态）；
 页面外壳取自 `template/` 目录下的可替换模板（`docs-index.html` / `docs-package.html` /
 `docs-type.html`），样式与脚本取自 `wwwroot/assets/css/docs.css`、`wwwroot/assets/js/docs.js`。
+
+访问量统计：成功渲染**包索引页 / 类型页**时，会对该 nuget 程序包的当日文档访问量 +1
+（记录到 `package_doc_activity` 表，见第 7 节）；全局索引 `/docs`、`/docs/index.html` 不对应具体包，
+不计入；包/版本/类型不存在而返回 404 的请求也不计入。该计数会并入包与全站的每日活动序列，
+在 `about.html` 与包详情页的三线图中作为「doc views」曲线展示。
 
 ### 管理（需 TOTP：`email` + `code`）
 
@@ -251,6 +256,7 @@ xGet batch    --server http://localhost:80 --email me@example.com --dir ./packag
 | `package_dependencies` | 依赖索引（含目标框架与版本区间） |
 | `package_metadata` | 完整 nuspec 元数据（含 readme 文件名、图标文件名） |
 | `package_activity` | 每日下载量与详情页访问量（UTC 日 `yyyy-MM-dd`） |
+| `package_doc_activity` | 每日 API 文档页访问量（按包 id + UTC 日，访问包索引页 / 类型页时 +1；全局索引不计） |
 | `package_clusters` | UMAP 三维坐标 + KMeans 聚类标签 |
 | `package_api_docs` | 每个包版本的 api 注释文档：命名空间、类型 fullname / 名称 / 摘要 / 成员数，以及该类型的文档 JSON（`payload`） |
 | `statistics` | 预计算统计文档：`tags`、`tag-network`、`dependency-network`、`package-clusters`、`cluster-state` |
@@ -280,9 +286,9 @@ xGet batch    --server http://localhost:80 --email me@example.com --dir ./packag
 | 页面 | 内容 |
 | --- | --- |
 | `index.html` | 包列表（搜索、分页）+ 数据库统计卡片；版本号作为 Package 列第三行 |
-| `package.html` | 包详情：manifest、tag、依赖、描述、发布说明、版本表、README（marked 渲染，禁用原始 HTML）、每日下载/访问曲线、聚类标签、API 文档入口链接 |
+| `package.html` | 包详情：manifest、tag、依赖、描述、发布说明、版本表、README（marked 渲染，禁用原始 HTML）、每日下载/访问/**文档访问**三线曲线、聚类标签、API 文档入口链接 |
 | `graph.html` | 标签词云 + Top 25 柱状图、UMAP 三维散点（cluster 链接筛选）、依赖网络（默认隐藏标签，hover 显示目标与邻接节点名） |
-| `about.html` | 统计总览（含累计浏览量）、Top 下载、最近发布、全站每日活动曲线 |
+| `about.html` | 统计总览（含累计浏览量、累计文档访问量）、Top 下载、最近发布、全站每日下载/访问/**文档访问**三线曲线 |
 | `tags.html` | 按 tag 查询包列表 |
 
 依赖库全部本地化于 `assets/vendor/`：`echarts`、`echarts-wordcloud`、`echarts-gl@2.0.9`、`marked@12.0.2`，

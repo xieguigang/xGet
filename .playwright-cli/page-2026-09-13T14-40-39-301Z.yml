@@ -1,0 +1,153 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - link "nuget server logo nuget package server" [ref=e3] [cursor=pointer]:
+      - /url: index.html
+      - img "nuget server logo" [ref=e4]
+      - strong [ref=e5]: nuget
+      - generic [ref=e6]: package server
+    - navigation [ref=e7]:
+      - link "Packages" [ref=e8] [cursor=pointer]:
+        - /url: index.html
+      - link "Statistics" [ref=e9] [cursor=pointer]:
+        - /url: about.html
+      - link "Graphs" [ref=e10] [cursor=pointer]:
+        - /url: graph.html
+      - link "API Docs" [ref=e11] [cursor=pointer]:
+        - /url: docs/index.html
+      - link "Service Index" [ref=e12] [cursor=pointer]:
+        - /url: v3/index.json
+    - link "Home" [ref=e13] [cursor=pointer]:
+      - /url: index.html
+      - text: ↖
+  - main [ref=e14]:
+    - paragraph [ref=e15]:
+      - generic [ref=e16]: "01"
+      - generic [ref=e17]: Database — Statistics
+    - heading "Feed telemetry and published packages." [level=1] [ref=e18]
+    - paragraph [ref=e19]: The package metadata is stored inside the JSql engine as plain json tables, while the physical .nupkg files live in the configured data directory. Everything below is computed live from the server json api.
+    - generic [ref=e20]:
+      - paragraph [ref=e21]:
+        - generic [ref=e22]: "02"
+        - generic [ref=e23]: Overview
+      - generic [ref=e24]:
+        - generic [ref=e25]:
+          - generic [ref=e26]: "01"
+          - generic [ref=e27]: "1"
+          - generic [ref=e28]: Packages
+        - generic [ref=e29]:
+          - generic [ref=e30]: "02"
+          - generic [ref=e31]: "1"
+          - generic [ref=e32]: Versions
+        - generic [ref=e33]:
+          - generic [ref=e34]: "03"
+          - generic [ref=e35]: "0"
+          - generic [ref=e36]: Total Downloads
+        - generic [ref=e37]:
+          - generic [ref=e38]: "04"
+          - generic [ref=e39]: "1"
+          - generic [ref=e40]: Registered Users
+        - generic [ref=e41]:
+          - generic [ref=e42]: "05"
+          - generic [ref=e43]: "0"
+          - generic [ref=e44]: Total Page Views
+        - generic [ref=e45]:
+          - generic [ref=e46]: "06"
+          - generic [ref=e47]: "5"
+          - generic [ref=e48]: Total Doc Views
+    - generic [ref=e49]:
+      - paragraph [ref=e50]:
+        - generic [ref=e51]: "03"
+        - generic [ref=e52]: Top Downloads
+      - table [ref=e55]:
+        - rowgroup [ref=e56]:
+          - row [ref=e57]:
+            - columnheader "Package" [ref=e58]
+            - columnheader "Latest" [ref=e59]
+            - columnheader "Versions" [ref=e60]
+            - columnheader "Downloads" [ref=e61]
+        - rowgroup [ref=e62]:
+          - row [ref=e63] [cursor=pointer]:
+            - cell "Nuget" [ref=e64]
+            - cell "1.0.0" [ref=e65]
+            - cell "1" [ref=e67]
+            - cell "0" [ref=e68]
+    - generic [ref=e69]:
+      - paragraph [ref=e70]:
+        - generic [ref=e71]: "04"
+        - generic [ref=e72]: Recent Publications
+      - table [ref=e75]:
+        - rowgroup [ref=e76]:
+          - row [ref=e77]:
+            - columnheader "Package" [ref=e78]
+            - columnheader "Version" [ref=e79]
+            - columnheader "Downloads" [ref=e80]
+            - columnheader "Published" [ref=e81]
+        - rowgroup [ref=e82]:
+          - row [ref=e83] [cursor=pointer]:
+            - cell "Nuget" [ref=e84]
+            - cell "1.0.0" [ref=e85]
+            - cell "0" [ref=e87]
+            - cell "2026-09-13" [ref=e88]
+    - generic [ref=e89]:
+      - paragraph [ref=e90]:
+        - generic [ref=e91]: "05"
+        - generic [ref=e92]: Feed Activity
+      - generic [ref=e94]:
+        - generic [ref=e95]: Daily downloads, page views & doc views
+        - generic [ref=e96]:
+          - button "7d" [ref=e97] [cursor=pointer]
+          - button "30d" [ref=e98] [cursor=pointer]
+          - button "90d" [ref=e99] [cursor=pointer]
+      - generic [ref=e103]:
+        - generic [ref=e104]: Downloads (period) 0
+        - generic [ref=e105]: Page views (period) 0
+        - generic [ref=e106]: Doc views (period) 5
+        - generic [ref=e107]: Basis UTC day
+    - generic [ref=e108]:
+      - paragraph [ref=e109]:
+        - generic [ref=e110]: "06"
+        - generic [ref=e111]: Protocol Endpoints
+      - generic [ref=e112]:
+        - generic [ref=e113]:
+          - generic [ref=e114]: GET
+          - generic [ref=e115]: /v3/index.json
+        - generic [ref=e116]:
+          - generic [ref=e117]: GET
+          - generic [ref=e118]: "/v3-flatcontainer/{id}/index.json"
+        - generic [ref=e119]:
+          - generic [ref=e120]: GET
+          - generic [ref=e121]: "/v3-flatcontainer/{id}/{version}/{file}"
+        - generic [ref=e122]:
+          - generic [ref=e123]: GET
+          - generic [ref=e124]: "/v3/registration/{id}/index.json"
+        - generic [ref=e125]:
+          - generic [ref=e126]: GET
+          - generic [ref=e127]: /v3/search
+        - generic [ref=e128]:
+          - generic [ref=e129]: GET
+          - generic [ref=e130]: /v3/autocomplete
+        - generic [ref=e131]:
+          - generic [ref=e132]: POST
+          - generic [ref=e133]: /api/register
+        - generic [ref=e134]:
+          - generic [ref=e135]: POST
+          - generic [ref=e136]: /api/v2/package
+        - generic [ref=e137]:
+          - generic [ref=e138]: PUT
+          - generic [ref=e139]: /api/v2/package
+      - generic [ref=e140]: Upload is only available through the xGet client using the experimental TOTP authentication. Download is anonymous and follows the standard NuGet v3 flat container layout.
+      - paragraph [ref=e141]: snapshot generated at 2026-09-13
+  - contentinfo [ref=e142]:
+    - link "Previous Packages" [ref=e144] [cursor=pointer]:
+      - /url: index.html
+      - generic [ref=e145]: Previous
+      - text: Packages
+    - generic [ref=e146]:
+      - link "nuget · experimental feed" [ref=e147] [cursor=pointer]:
+        - /url: https://github.com/xieguigang/xGet
+      - text: · powered by
+      - link "Fluteway" [ref=e148] [cursor=pointer]:
+        - /url: https://github.com/xieguigang/flute
+      - text: +
+      - link "JSql" [ref=e149] [cursor=pointer]:
+        - /url: https://github.com/xieguigang/JSql

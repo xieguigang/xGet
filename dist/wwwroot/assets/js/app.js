@@ -119,6 +119,7 @@
         setText('stat-downloads', formatNumber(stats.downloads));
         setText('stat-users', formatNumber(stats.users));
         setText('stat-views', formatNumber(stats.views));
+        setText('stat-doc-views', formatNumber(stats.docViews));
     }
 
     function setText(id, value) {
@@ -206,6 +207,7 @@
     var TREND = {
         downloads: '#3fae4a',
         views: '#6fa8dc',
+        docs: '#d9a94a',
         hairline: 'rgba(255,255,255,.16)',
         split: 'rgba(255,255,255,.06)',
         text: '#9a9a9a',
@@ -216,14 +218,16 @@
         var days = [];
         var downloads = [];
         var views = [];
+        var docViews = [];
 
         (points || []).forEach(function (point) {
             days.push(point.day);
             downloads.push(Number(point.downloads || 0));
             views.push(Number(point.views || 0));
+            docViews.push(Number(point.docViews || 0));
         });
 
-        return { days: days, downloads: downloads, views: views };
+        return { days: days, downloads: downloads, views: views, docViews: docViews };
     }
 
     function areaLine(name, data, color) {
@@ -252,7 +256,7 @@
             backgroundColor: 'transparent',
             grid: { left: 10, right: 16, top: 34, bottom: 4, containLabel: true },
             legend: {
-                data: ['downloads', 'page views'],
+                data: ['downloads', 'page views', 'doc views'],
                 right: 6,
                 top: 0,
                 icon: 'roundRect',
@@ -292,7 +296,8 @@
             },
             series: [
                 areaLine('downloads', series.downloads, TREND.downloads),
-                areaLine('page views', series.views, TREND.views)
+                areaLine('page views', series.views, TREND.views),
+                areaLine('doc views', series.docViews, TREND.docs)
             ]
         };
     }
@@ -328,6 +333,7 @@
     function renderActivityTotals(prefix, result) {
         setText(prefix + '-activity-downloads', formatNumber(result.totalDownloads));
         setText(prefix + '-activity-views', formatNumber(result.totalViews));
+        setText(prefix + '-activity-doc-views', formatNumber(result.totalDocViews));
 
         var host = $(prefix + '-activity-totals');
         if (host) {
