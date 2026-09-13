@@ -52,9 +52,12 @@
     <Project Path="src/Nuget/Nuget.vbproj">
       <Platform Solution="*|x64" Project="x64" />
     </Project>
+    <Project Path="src/Readership/Readership.vbproj" Id="b480d0c5-84ec-44f8-be0f-b3fb7640aa31" />
   </Folder>
-  <Project Path="src/Readership/Readership.vbproj" Id="b480d0c5-84ec-44f8-be0f-b3fb7640aa31" />
   <Project Path="src/xGet/xGet.vbproj" Id="b217e061-6101-4314-850b-29c931e01485">
+    <Platform Solution="*|x64" Project="x64" />
+  </Project>
+  <Project Path="test/test.vbproj">
     <Platform Solution="*|x64" Project="x64" />
   </Project>
 </Solution>
