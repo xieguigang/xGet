@@ -18,9 +18,9 @@ Public Class CommentMarkdown
     Private ReadOnly cache As New Dictionary(Of String, String)
 
     ''' <summary>
-    ''' the markdown renderer emits ``&lt;a href="cref:..."&gt;...&lt;/a&gt;`` for
-    ''' the cross reference links, here we resolve the ``cref:`` url into the real
-    ''' page url of the document site.
+    ''' the markdown renderer emits a html anchor whose href is a ``cref:`` url
+    ''' for the cross reference links, here we resolve the target identity into
+    ''' the real page url of the document site.
     ''' </summary>
     Private Shared ReadOnly crefAnchor As New Regex(
         "<a\s+href=""cref:(?<id>[^""]*)""[^>]*>(?<text>.*?)</a>",

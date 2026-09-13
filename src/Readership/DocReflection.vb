@@ -1,5 +1,6 @@
 Imports System.IO
 Imports System.Reflection
+Imports System.Runtime.Loader
 
 ''' <summary>
 ''' The reflection based supplement of the api reference document. The xml
@@ -8,11 +9,13 @@ Imports System.Reflection
 ''' xml comment are simply absent. This module reflects the sibling clr assembly
 ''' of a comment document and appends the missing members (public only) to the
 ''' document model, with an empty comment text.
+''' 
+''' The assemblies are loaded from their raw bytes into a collectible
+''' <see cref="AssemblyLoadContext"/> which is unloaded when the extraction
+''' finished: this keeps the server process from accumulating assemblies and it
+''' does not lock the package files.
 ''' </summary>
 Public Module DocReflection
-
-    Private ReadOnly sync As New Object
-    Private ReadOnly loaded As New Dictionary(Of String, Assembly)(StringComparer.OrdinalIgnoreCase)
 
     ''' <summary>
     ''' supplement the document with the missing public members of every sibling
@@ -26,31 +29,53 @@ Public Module DocReflection
             Return
         End If
 
-        For Each xml As String In xmlDocuments
-            Dim assemblyPath As String = Path.ChangeExtension(xml, ".dll")
+        Dim context As New AssemblyLoadContext("xdoc-reflection-" & Guid.NewGuid().ToString("N"), isCollectible:=True)
 
-            If Not File.Exists(assemblyPath) Then
-                Continue For
-            End If
+        Try
+            Dim cache As New Dictionary(Of String, Assembly)(StringComparer.OrdinalIgnoreCase)
 
-            Call SupplementAssembly(document, assemblyPath, warnings)
-        Next
+            For Each xml As String In xmlDocuments
+                Dim assemblyPath As String = Path.ChangeExtension(xml, ".dll")
+
+                If Not File.Exists(assemblyPath) Then
+                    Continue For
+                End If
+
+                Dim asm As Assembly = loadAssembly(context, assemblyPath, cache, warnings)
+
+                If asm Is Nothing Then
+                    Continue For
+                End If
+
+                Call supplementAssembly(document, asm, assemblyPath, warnings)
+            Next
+        Finally
+            ' the collectible context releases the reflection only assemblies
+            context.Unload()
+        End Try
     End Sub
 
-    ''' <summary>
-    ''' supplement the document with the missing public members of one clr
-    ''' assembly.
-    ''' </summary>
-    ''' <param name="document"></param>
-    ''' <param name="assemblyPath"></param>
-    ''' <param name="warnings"></param>
-    Public Sub SupplementAssembly(document As ApiDocDocument, assemblyPath As String, warnings As List(Of String))
-        Dim asm As Assembly = loadAssembly(assemblyPath, warnings)
+    Private Function loadAssembly(context As AssemblyLoadContext, assemblyPath As String,
+                                  cache As Dictionary(Of String, Assembly), warnings As List(Of String)) As Assembly
 
-        If asm Is Nothing Then
-            Return
+        Dim cached As Assembly = Nothing
+
+        If cache.TryGetValue(assemblyPath, cached) Then
+            Return cached
         End If
 
+        Try
+            Dim bytes As Byte() = File.ReadAllBytes(assemblyPath)
+            Dim asm As Assembly = context.LoadFromStream(New MemoryStream(bytes))
+            cache(assemblyPath) = asm
+            Return asm
+        Catch ex As Exception
+            Call appendWarning(warnings, $"failed to load the assembly '{assemblyPath}': {ex.Message}")
+            Return Nothing
+        End Try
+    End Function
+
+    Private Sub supplementAssembly(document As ApiDocDocument, asm As Assembly, assemblyPath As String, warnings As List(Of String))
         Dim types As Dictionary(Of String, Type) = publicTypes(asm, assemblyPath, warnings)
 
         If types.Count = 0 Then
@@ -72,25 +97,6 @@ Public Module DocReflection
             End Try
         Next
     End Sub
-
-    Private Function loadAssembly(assemblyPath As String, warnings As List(Of String)) As Assembly
-        SyncLock sync
-            Dim cached As Assembly = Nothing
-
-            If loaded.TryGetValue(assemblyPath, cached) Then
-                Return cached
-            End If
-
-            Try
-                Dim asm As Assembly = Assembly.LoadFrom(assemblyPath)
-                loaded(assemblyPath) = asm
-                Return asm
-            Catch ex As Exception
-                Call appendWarning(warnings, $"failed to load the assembly '{assemblyPath}': {ex.Message}")
-                Return Nothing
-            End Try
-        End SyncLock
-    End Function
 
     ''' <summary>
     ''' build the public type index of an assembly. A partially loadable assembly
@@ -179,7 +185,7 @@ Public Module DocReflection
                 Continue For
             End If
 
-            Call entry.members.Add(newMember(entry, "F"c, "field", f.Name, If(f.IsLiteral, entry.fullName & "." & f.Name, entry.fullName & "." & f.Name)))
+            Call entry.members.Add(newMember(entry, "F"c, "field", f.Name, entry.fullName & "." & f.Name))
         Next
 
         For Each p As PropertyInfo In src.GetProperties(flags)

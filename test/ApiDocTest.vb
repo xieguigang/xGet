@@ -1,4 +1,5 @@
 Imports System.IO
+Imports System.Text.Json
 Imports System.Text.RegularExpressions
 Imports Readership
 
@@ -50,11 +51,67 @@ Module ApiDocTest
         End If
 
         Dim ok As Boolean = validate(output)
+        Dim extractOk As Boolean = verifyExtract(input)
 
         Call Console.WriteLine()
-        Call Console.WriteLine($"validation: {If(ok, "PASS", "FAIL")}")
+        Call Console.WriteLine($"validation: {If(ok AndAlso extractOk, "PASS", "FAIL")}")
 
-        Return If(ok, 0, 1)
+        Return If(ok AndAlso extractOk, 0, 1)
+    End Function
+
+    ''' <summary>
+    ''' verify the data extract stage: the extracted document model must be
+    ''' equivalent to the generated site and it must survive a json round trip,
+    ''' because the nuget server stores the document data as json.
+    ''' </summary>
+    ''' <param name="input"></param>
+    ''' <returns></returns>
+    Private Function verifyExtract(input As String) As Boolean
+        Call Console.WriteLine()
+        Call Console.WriteLine("extract stage:")
+
+        Dim extract As ApiDocExtractResult
+
+        Try
+            extract = ApiDoc.Extract(New ApiDocOptions With {
+                .Input = input,
+                .Clean = False
+            })
+        Catch ex As Exception
+            Call Console.WriteLine($"  extract failed: {ex.Message}")
+            Return False
+        End Try
+
+        Dim document As ApiDocDocument = extract.Document
+        Dim supplemented As Integer = 0
+
+        For Each t As ApiDocType In document.types
+            For Each m As ApiDocMember In t.members
+                If String.IsNullOrWhiteSpace(m.summary) AndAlso Not String.IsNullOrWhiteSpace(m.declaration) Then
+                    supplemented += 1
+                End If
+            Next
+        Next
+
+        For Each w As String In extract.Warnings
+            Call Console.WriteLine($"  warning: {w}")
+        Next
+
+        Dim json As String = JsonSerializer.Serialize(document)
+        Dim roundTrip As ApiDocDocument = JsonSerializer.Deserialize(Of ApiDocDocument)(json)
+
+        Call Console.WriteLine($"  {extract}")
+        Call Console.WriteLine($"  json payload : {json.Length} chars, round trip {roundTrip}")
+        Call Console.WriteLine($"  no comment members (reflection supplemented): {supplemented}")
+
+        Dim ok As Boolean = roundTrip.TypeCount() = document.TypeCount() AndAlso
+            roundTrip.MemberCount() = document.MemberCount()
+
+        If Not ok Then
+            Call Console.WriteLine("  the document json round trip lost data.")
+        End If
+
+        Return ok
     End Function
 
     Private Function validate(output As String) As Boolean

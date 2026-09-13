@@ -86,6 +86,7 @@ Public Module ApiDocRenderer
         model("title") = $"{packageId} {version}".Trim()
         model("package_id") = packageId
         model("package_version") = version
+        model("version") = version
         model("version_select") = If(versionSelect, "")
 
         Return model
@@ -117,6 +118,7 @@ Public Module ApiDocRenderer
         model("type_fullname") = If(t.fullName, "")
         model("package_id") = packageId
         model("package_version") = version
+        model("version") = version
 
         Return model
     End Function

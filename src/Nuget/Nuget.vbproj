@@ -10,7 +10,8 @@
     <Platforms>AnyCPU;x64</Platforms>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AssemblyTitle>NuGet Server Controller Module</AssemblyTitle>
-    <Authors>scibasic.net foundation</Authors>
+    <Authors>xieguigang; deepseek</Authors>
+    <Company>scibasic.net foundation</Company>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">

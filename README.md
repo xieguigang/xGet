@@ -16,22 +16,31 @@
 g:/xDoc/
 ├── src/
 │   ├── Nuget/                      # 服务端控制器类库
-│   │   ├── Service.vb              # HTTP 控制器：NuGet v3 协议 + Web REST + 管理端点 + 周期任务
-│   │   ├── NugetConfiguration.vb   # 运行配置解析（数据目录、聚类参数等）
-│   │   ├── NugetStore.vb           # JSql 数据访问层（8 张表，Monitor 串行化）
+│   │   ├── Service.vb              # HTTP 控制器：NuGet v3 协议 + Web REST + /docs 文档页 + 管理端点 + 周期任务
+│   │   ├── NugetConfiguration.vb   # 运行配置解析（数据目录、template、聚类参数等）
+│   │   ├── NugetStore.vb           # JSql 数据访问层（9 张表，Monitor 串行化）
 │   │   ├── NugetStatistics.vb      # 标签分布 / 标签关系网络 / 依赖网络统计文档
 │   │   ├── PackageClusterAnalysis.vb # tag 0/1 矩阵 → UMAP 3D → KMeans 聚类
-│   │   ├── NupkgReader.vb          # nupkg 解析（nuspec 元数据、icon、readme 提取）
+│   │   ├── NupkgReader.vb          # nupkg 解析（nuspec 元数据、icon、readme、lib 注释文档提取）
+│   │   ├── PackageApiDocs.vb       # 上传时从 nupkg 提取 api 文档并生成入库记录
+│   │   ├── ApiDocPages.vb          # 从数据库重建文档模型 + 读取模板服务端渲染三类文档页
 │   │   ├── TotpAuth.vb             # TOTP 注册与校验（每用户 128 字符盐）
 │   │   └── TotpModule.vb           # RFC 6238 实现（生成/校验/otpauth URI/自检）
 │   ├── xGet/                       # 客户端控制台程序
 │   │   ├── Program.vb              # register / upload / batch 子命令
 │   │   ├── NugetApiClient.vb       # HTTP 客户端（注册、multipart 上传）
 │   │   └── AccountStore.vb         # 本地 TOTP 密钥存储
-│   └── Readership/                 # 代码 API 文档自动生成类库
-│       ├── ApiDocOptions.vb        # 生成选项（Input / Output / Theme / Title，Output 必填）
-│       ├── ApiDocGenerator.vb      # 公共入口 ApiDoc.Generate 与 DocBuildResult
-│       ├── ApiDocSite.vb           # 站点导航模型、slug 生成与 cref→url 索引
+│   └── Readership/                 # 代码 API 文档自动生成类库（提取 / 渲染两阶段）
+│       ├── ApiDocOptions.vb        # 生成选项（Input / Output / Theme / Title / ReflectSupplement）
+│       ├── ApiDocDocument.vb       # [新增] 可序列化文档模型（命名空间 / 类型 / 成员 / 参数）
+│       ├── ApiDocExtract.vb        # [新增] 提取阶段：把 xml 注释模型转换为文档模型
+│       ├── ApiDocIndex.vb          # [新增] 文档索引：命名空间/类型查找、cref→url、命名空间树
+│       ├── DocReflection.vb        # [新增] dll 反射补全缺失的 public 成员（含 enum 成员）
+│       ├── DocNaming.vb            # [新增] slug / 类型名 / 参数签名等纯函数工具
+│       ├── DocUrls.vb              # [新增] 离线静态站点与 nuget 伪静态页面两套 url 方案
+│       ├── DocTemplate.vb          # [新增] {{占位符}} 模板渲染器
+│       ├── ApiDocRenderer.vb       # [新增] 三类 nuget 文档页的内容片段与模板占位符模型
+│       ├── ApiDocGenerator.vb      # 公共入口 ApiDoc.Extract / ApiDoc.Generate 与 DocBuildResult
 │       ├── CommentMarkdown.vb      # MarkdownRender 封装与 cref 链接路由解析
 │       ├── Html/                   # 首页 / 命名空间页 / 类型页写出器与页面骨架
 │       └── Themes/                 # 默认 scibasic 主题（内嵌资源）与主题解析
@@ -39,6 +48,7 @@ g:/xDoc/
 ├── dist/
 │   ├── bin/                        # 编译输出（Nuget.dll、Fluteway、xGet 等）
 │   ├── wwwroot/                    # 前端站点（页面 + assets）
+│   ├── template/                   # API 文档页模板（docs-index / docs-package / docs-type，可替换）
 │   ├── run.cmd / run.sh            # 启动脚本
 │   └── data/                       # 运行时数据（JSql 库 + 包文件），首次启动按 --data 自动创建
 ├── docs/build.txt                  # 原始需求与命令行示例
@@ -62,8 +72,11 @@ dotnet build src/Readership/Readership.vbproj
 # TOTP 自检
 dotnet run --project test/test.vbproj
 
-# API 文档生成 + 链接校验（input 为单个 xml / 程序集，或包含 *.xml 的目录）
+# API 文档生成 + 链接校验 + 提取阶段校验（input 为单个 xml / 程序集，或包含 *.xml 的目录）
 dotnet run --project test/test.vbproj -- apidoc "./dist/bin" "./dist/docs" scibasic
+
+# 服务端文档页自检（提取 → 入库 → 重建 → 模板渲染，不启动 http 服务）
+dotnet run --project test/test.vbproj -- serverdocs
 ```
 
 外部依赖（通过 `ProjectReference` 引用，需存在对应代码库）：
@@ -120,6 +133,7 @@ data=./data
 packages=./data/packages
 db=./data/db
 wwwroot=./wwwroot
+template=./template          ; API 文档页 html 模板目录，默认取 wwwroot 同级的 template
 base-url=http://nuget.scibasic.net/
 
 ; 周期性聚类分析
@@ -183,7 +197,7 @@ xGet batch    --server http://localhost:80 --email me@example.com --dir ./packag
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/packages?q=&skip=&take=` | 包列表（分组到最新版本） |
-| GET | `/api/package/{id}` | 包详情（含版本列表、依赖、readme、聚类标签） |
+| GET | `/api/package/{id}` | 包详情（含版本列表、依赖、readme、聚类标签、api 文档入口 `docs`） |
 | GET | `/api/package/{id}/{version}` | 指定版本详情 |
 | GET | `/api/stats` | 总览统计 + Top 下载 + 最近发布 |
 | GET | `/api/tag/{tag}?skip=&take=` | 按 tag 查包 |
@@ -195,6 +209,18 @@ xGet batch    --server http://localhost:80 --email me@example.com --dir ./packag
 | GET | `/api/stats/tag-network` | 共享标签关系网络 |
 | GET | `/api/stats/dependency-network` | nuspec 依赖网络 |
 | GET | `/api/stats/clusters` | UMAP + KMeans 聚类文档 |
+
+### API 文档页（服务端渲染，伪静态）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/docs`、`/docs/index.html` | 跨包全局命名空间 / 类型索引 |
+| GET | `/docs/{id}/{version}/index.html` | 程序包帮助文档索引（含版本切换） |
+| GET | `/docs/{id}/{version}/{type}.html` | 类型内容页（`type` 为 URL 编码的类型 fullname） |
+
+三个页面均由服务端从 `package_api_docs` 表重建文档模型后渲染，返回最终 html（伪静态）；
+页面外壳取自 `template/` 目录下的可替换模板（`docs-index.html` / `docs-package.html` /
+`docs-type.html`），样式与脚本取自 `wwwroot/assets/css/docs.css`、`wwwroot/assets/js/docs.js`。
 
 ### 管理（需 TOTP：`email` + `code`）
 
@@ -226,6 +252,7 @@ xGet batch    --server http://localhost:80 --email me@example.com --dir ./packag
 | `package_metadata` | 完整 nuspec 元数据（含 readme 文件名、图标文件名） |
 | `package_activity` | 每日下载量与详情页访问量（UTC 日 `yyyy-MM-dd`） |
 | `package_clusters` | UMAP 三维坐标 + KMeans 聚类标签 |
+| `package_api_docs` | 每个包版本的 api 注释文档：命名空间、类型 fullname / 名称 / 摘要 / 成员数，以及该类型的文档 JSON（`payload`） |
 | `statistics` | 预计算统计文档：`tags`、`tag-network`、`dependency-network`、`package-clusters`、`cluster-state` |
 
 > JSql 无参数化/事务/自增/BLOB，且非线程安全；本项目在 `NugetStore` 内用 `SyncLock` 串行化所有访问，并对字符串做手工转义。
@@ -253,13 +280,17 @@ xGet batch    --server http://localhost:80 --email me@example.com --dir ./packag
 | 页面 | 内容 |
 | --- | --- |
 | `index.html` | 包列表（搜索、分页）+ 数据库统计卡片；版本号作为 Package 列第三行 |
-| `package.html` | 包详情：manifest、tag、依赖、描述、发布说明、版本表、README（marked 渲染，禁用原始 HTML）、每日下载/访问曲线、聚类标签 |
+| `package.html` | 包详情：manifest、tag、依赖、描述、发布说明、版本表、README（marked 渲染，禁用原始 HTML）、每日下载/访问曲线、聚类标签、API 文档入口链接 |
 | `graph.html` | 标签词云 + Top 25 柱状图、UMAP 三维散点（cluster 链接筛选）、依赖网络（默认隐藏标签，hover 显示目标与邻接节点名） |
 | `about.html` | 统计总览（含累计浏览量）、Top 下载、最近发布、全站每日活动曲线 |
 | `tags.html` | 按 tag 查询包列表 |
 
 依赖库全部本地化于 `assets/vendor/`：`echarts`、`echarts-wordcloud`、`echarts-gl@2.0.9`、`marked@12.0.2`，
 以及保留备用的 `3d-force-graph`、`three.min.js`。样式沿用 scibasic.net 的暗色风格（`assets/css/scibasic.css`）。
+
+API 文档页（`/docs/...`）由服务端渲染，不属于静态页面：其 html 模板放在 `dist/template/`，
+样式与交互放在 `dist/wwwroot/assets/css/docs.css` 与 `dist/wwwroot/assets/js/docs.js`
+（`docs.js` 提供命名空间树筛选、侧栏折叠与锚点平滑跳转），两者都可以直接替换而无需重新编译。
 
 ---
 
@@ -274,9 +305,33 @@ xGet batch    --server http://localhost:80 --email me@example.com --dir ./packag
 
 ## 11. API 文档生成（Readership）
 
-`src/Readership/Readership.vbproj` 是一个类库，把 .NET 程序集编译出的 XML 注释文档渲染为一套可离线浏览的静态 API 文档站点：
+`src/Readership/Readership.vbproj` 是一个类库：它既能把 .NET 程序集编译出的 XML 注释文档渲染为一套可离线浏览的静态 API 文档站点，
+也向 nuget 服务提供「随包 API 文档」的提取与页面片段渲染能力。生成过程被拆分为**提取数据**与**按页渲染**两个独立阶段。
 
-- 输入：单个 `*.xml`、单个程序集（自动按同名 `.xml` 取注释文档），或一个包含多个 `*.xml` 的目录（合并为一个站点）。
+### 提取数据（`ApiDoc.Extract`）
+
+- 输入：单个 `*.xml`、单个程序集（自动按同名 `.xml` 取注释文档），或一个包含多个 `*.xml` 的目录（合并为一个文档集）。
+- 流程：`ProjectSpace` 导入 XML 注释 → 构建可序列化的 `ApiDocDocument`（命名空间 / 类型 / 成员 / 参数的纯数据对象，含全部注释文本）→ 分配页面 url → 返回 `ApiDocExtractResult`（文档 + 非致命警告）。
+- 文档模型完全脱离 Core 的 `ProjectType` / `ProjectMember` 实时对象，可直接 `System.Text.Json` 序列化，因此可以按类型逐条入库（nuget 侧），也可以整体渲染为静态站点。
+
+### 反射补全（`DocReflection`）
+
+XML 注释只包含实际写了注释的成员：例如某个 enum 的部分成员没有注释时，注释文档中根本不存在这些成员。
+`DocReflection` 会为每个 `*.xml` 查找同目录同名 `*.dll`，反射枚举 **public** 类型与 public 成员
+（字段（含 enum 常量）、属性、方法、事件），把文档中缺失的成员补进文档模型，补入的成员没有注释文本；
+加载失败或类型不匹配只记录警告。可用 `ApiDocOptions.ReflectSupplement = False` 关闭。
+
+### 按页渲染（Render）
+
+- 离线静态站点：`ApiDoc.Generate(options)` = 提取 + 内置页面骨架逐页渲染 + 落盘，行为与拆分前一致。
+- 页面片段：`IndexPageWriter` / `NamespacePageWriter` / `TypePageWriter` 提供 `RenderContent(...)` 只输出内容片段，
+  `DocSiteContext.Sidebar(...)` 输出侧栏，`ApiDocRenderer` 为 nuget 三类文档页生成占位符模型，
+  `DocTemplate.Render(template, values)` 做 `{{key}}` 占位符替换（未知键置空）。
+- url 方案：`DocUrls` 提供两套 —— 离线站点按命名空间分目录（`namespaces/...`、`types/...`），
+  nuget 侧为 `/docs/{pkg}/{version}/{typeFullName}.html`。
+
+### 页面结构（与拆分前一致）
+
 - 页面结构：首页索引 → 每个命名空间一页 → 每个类型一页；类型内的字段 / 属性 / 方法 / 事件以锚点定位，类型页包含签名、参数表、返回值与示例；面包屑按命名空间段逐级链接。
 - 左侧导航：用 Core 的 `FileSystemTree`（`ApplicationServices/FileSystem/Fs/FileSystemTree.vb`）把命名空间构造成一棵树，页面左侧按树逐级展开，**节点只显示本段的名称**（如 `Microsoft` → `VisualBasic` → `ApplicationServices`），并显示该子树下的类型数量角标；当前页面所属命名空间的祖先链自动展开并高亮，当前命名空间下以短名列出其类型。
 - 侧栏行为：侧栏高度不受限制、没有内部滚动条（整页共用同一个滚动条），与正文之间保留 32px 间隔；顶栏提供折叠按钮，可随时收起/展开侧栏，折叠状态写入 `localStorage`（`readership.sidebar`）并在下次访问时恢复，首屏通过内联引导脚本避免闪烁。
@@ -292,15 +347,49 @@ xGet batch    --server http://localhost:80 --email me@example.com --dir ./packag
 - 输出目录必须由参数显式指定，没有默认值。
 
 ```vb
+' 一步生成离线站点（= 提取 + 渲染全部页面）
 Dim result = Readership.ApiDoc.Generate(New Readership.ApiDocOptions With {
     .Input = "./dist/bin",
     .Output = "./dist/docs",
     .Theme = "scibasic",
     .Title = "xDoc API Reference"
 })
+
+' 只提取数据（例如交给 nuget 服务入库）
+Dim extracted = Readership.ApiDoc.Extract(New Readership.ApiDocOptions With {
+    .Input = "./dist/bin",
+    .ReflectSupplement = True
+})
+Dim document = extracted.Document
 ```
 
-生成测试（`test/test.vbproj`）在写出站点后会遍历全部页面，校验内部链接与锚点可达、`cref:` 链接已解析，并输出页面 / 命名空间 / 类型 / 成员计数。
+生成测试（`test/test.vbproj` 的 `apidoc` 子命令）在写出站点后会遍历全部页面，校验内部链接与锚点可达、`cref:` 链接已解析，
+并额外校验提取阶段的文档可 JSON 往返、统计反射补全出的无注释成员数。
+
+---
+
+## 12. 随包 API 文档（服务端）
+
+上传 nupkg 时（`Service.uploadPackage`）在完成包发布与统计重建后，会 best-effort 提取随包 API 文档：
+
+1. `NupkgReader.ExtractLibComments` 选取 `lib/` 下优先级最高的目标框架（`net10.0` > `netstandard2.0` > `net48`），
+   把该框架目录下的 `*.xml` 与同名 `*.dll` 解包到临时目录；
+2. `Readership.ApiDoc.Extract` 解析注释（并反射 dll 补全缺失成员）；
+3. `PackageApiDocs` 把每个类型序列化为一行 `PackageApiDocRecord`，`NugetStore.ReplacePackageApiDocs` 写入
+   `package_api_docs` 表（键为包 id + 版本）。
+
+任何一步失败都只记录 warning，不影响包发布成功。之后浏览器访问：
+
+- `/docs/index.html`：跨包全局命名空间 / 类型索引；
+- `/docs/{id}/{version}/index.html`：该包该版本的命名空间 / 类型索引（含版本切换）；
+- `/docs/{id}/{version}/{typeFullName}.html`：类型内容页，按包 id + 版本 + 类型 fullname 从表中读取并渲染。
+
+三类页面都在服务端渲染后返回完整 html（伪静态），页面外壳来自可替换模板
+`dist/template/docs-index.html`、`docs-package.html`、`docs-type.html`；模板缺失时回退内置最小模板并记录警告。
+`package.html` 通过 `/api/package/{id}` 响应中的 `docs` 字段渲染「API Documentation」跳转链接。
+
+自检：`dotnet run --project test/test.vbproj -- serverdocs [nupkg] [template]`
+（提取 → 入库 → 重建文档模型 → 渲染三类页面，全程不启动 http 服务）。
 
 ---
 
