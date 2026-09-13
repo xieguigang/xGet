@@ -24,11 +24,18 @@ g:/xDoc/
 │   │   ├── NupkgReader.vb          # nupkg 解析（nuspec 元数据、icon、readme 提取）
 │   │   ├── TotpAuth.vb             # TOTP 注册与校验（每用户 128 字符盐）
 │   │   └── TotpModule.vb           # RFC 6238 实现（生成/校验/otpauth URI/自检）
-│   └── xGet/                       # 客户端控制台程序
-│       ├── Program.vb              # register / upload / batch 子命令
-│       ├── NugetApiClient.vb       # HTTP 客户端（注册、multipart 上传）
-│       └── AccountStore.vb         # 本地 TOTP 密钥存储
-├── test/                           # TOTP 算法自检（RFC 6238 附录 B 测试向量）
+│   ├── xGet/                       # 客户端控制台程序
+│   │   ├── Program.vb              # register / upload / batch 子命令
+│   │   ├── NugetApiClient.vb       # HTTP 客户端（注册、multipart 上传）
+│   │   └── AccountStore.vb         # 本地 TOTP 密钥存储
+│   └── Readership/                 # 代码 API 文档自动生成类库
+│       ├── ApiDocOptions.vb        # 生成选项（Input / Output / Theme / Title，Output 必填）
+│       ├── ApiDocGenerator.vb      # 公共入口 ApiDoc.Generate 与 DocBuildResult
+│       ├── ApiDocSite.vb           # 站点导航模型、slug 生成与 cref→url 索引
+│       ├── CommentMarkdown.vb      # MarkdownRender 封装与 cref 链接路由解析
+│       ├── Html/                   # 首页 / 命名空间页 / 类型页写出器与页面骨架
+│       └── Themes/                 # 默认 scibasic 主题（内嵌资源）与主题解析
+├── test/                           # 命令行自检（TOTP RFC 6238 向量 + API 文档生成校验）
 ├── dist/
 │   ├── bin/                        # 编译输出（Nuget.dll、Fluteway、xGet 等）
 │   ├── wwwroot/                    # 前端站点（页面 + assets）
@@ -49,8 +56,14 @@ dotnet build src/Nuget/Nuget.vbproj
 # 客户端
 dotnet build src/xGet/xGet.vbproj
 
+# API 文档生成类库
+dotnet build src/Readership/Readership.vbproj
+
 # TOTP 自检
 dotnet run --project test/test.vbproj
+
+# API 文档生成 + 链接校验（input 为单个 xml / 程序集，或包含 *.xml 的目录）
+dotnet run --project test/test.vbproj -- apidoc "./dist/bin" "./dist/docs" scibasic
 ```
 
 外部依赖（通过 `ProjectReference` 引用，需存在对应代码库）：
@@ -256,6 +269,30 @@ xGet batch    --server http://localhost:80 --email me@example.com --dir ./packag
 - UMAP/KMeans 缺少固定随机种子，同一份数据每次重建的绝对坐标与簇编号可能不同。
 - 通过静态直链（`/packages/...`）下载不会计入每日下载量，页面与 NuGet 客户端均走控制器路径。
 - 上传认证为实验性 TOTP 方案，未实现用户管理、权限与审计等能力。
+
+## 11. API 文档生成（Readership）
+
+`src/Readership/Readership.vbproj` 是一个类库，把 .NET 程序集编译出的 XML 注释文档渲染为一套可离线浏览的静态 API 文档站点：
+
+- 输入：单个 `*.xml`、单个程序集（自动按同名 `.xml` 取注释文档），或一个包含多个 `*.xml` 的目录（合并为一个站点）。
+- 页面结构：首页索引 → 每个命名空间一页 → 每个类型一页；类型内的字段 / 属性 / 方法 / 事件以锚点定位，类型页包含签名、参数表、返回值与示例。
+- 注释渲染：`summary` / `remarks` / 参数 / 返回值 / 示例等文本统一经 `MarkdownRender`（`markdown.NET5.vbproj`）转换为 HTML。
+- 对象链接：`<see cref="..."/>` / `<seealso cref="..."/>` 由 Core 的 `TrimAssemblyDoc` 预处理为保留 cref 目标的 Markdown 链接，Readership 侧再解析为站点内实际的页面 / 锚点链接；站外目标降级为等宽文本。
+- 主题：内置默认 `scibasic` 暗色主题（与 `dist/wwwroot` 前端页面一致）；`Theme` 也可以指向一个外部主题目录，目录中的 `*.css` / `*.js` 会被发布到站点 `assets/` 并自动引用。
+- 输出目录必须由参数显式指定，没有默认值。
+
+```vb
+Dim result = Readership.ApiDoc.Generate(New Readership.ApiDocOptions With {
+    .Input = "./dist/bin",
+    .Output = "./dist/docs",
+    .Theme = "scibasic",
+    .Title = "xDoc API Reference"
+})
+```
+
+生成测试（`test/test.vbproj`）在写出站点后会遍历全部页面，校验内部链接与锚点可达、`cref:` 链接已解析，并输出页面 / 命名空间 / 类型 / 成员计数。
+
+---
 
 ## 许可
 
