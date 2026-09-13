@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<?xml-stylesheet type="text/xsl" href="/assets/sitemap.xsl"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>http://localhost:8090/</loc>
+    <lastmod>2026-09-13T18:25:48Z</lastmod>
+  </url>
+  <url>
+    <loc>http://localhost:8090/about.html</loc>
+    <lastmod>2026-09-13T18:25:49Z</lastmod>
+  </url>
+  <url>
+    <loc>http://localhost:8090/graph.html</loc>
+    <lastmod>2026-09-13T18:25:50Z</lastmod>
+  </url>
+  <url>
+    <loc>http://localhost:8090/tags.html</loc>
+    <lastmod>2026-09-13T18:25:50Z</lastmod>
+  </url>
+  <url>
+    <loc>http://localhost:8090/docs/index.html</loc>
+    <lastmod>2026-09-13T18:26:28Z</lastmod>
+  </url>
+</urlset>
