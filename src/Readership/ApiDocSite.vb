@@ -152,7 +152,7 @@ Public Class DocTypeEntry
     ''' the containing namespace entry
     ''' </summary>
     ''' <returns></returns>
-    Public Property [Namespace] As DocNamespaceEntry
+    Public Property ContainingNamespace As DocNamespaceEntry
 
     Public ReadOnly Property Members As New List(Of DocMemberEntry)
 
@@ -250,7 +250,7 @@ Public Class ApiDocSite
                         .FullName = fullName,
                         .Project = proj.Name,
                         .Source = t,
-                        .Namespace = nsEntry,
+                        .ContainingNamespace = nsEntry,
                         .Url = PageUrl("types", fullName, typeSlugs)
                     }
 

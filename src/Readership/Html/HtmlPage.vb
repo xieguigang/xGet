@@ -279,7 +279,7 @@ Public Class DocSiteContext
 
         For Each t As DocTypeEntry In Site.Types
             If String.Equals(t.Url, pageUrl, StringComparison.OrdinalIgnoreCase) Then
-                Return t.Namespace.Name
+                Return t.ContainingNamespace.Name
             End If
         Next
 
