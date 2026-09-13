@@ -55,9 +55,23 @@ Public Class CommentMarkdown
         Return html
     End Function
 
+    ''' <summary>
+    ''' decode the url encoded characters of a cref identity, they are encoded by
+    ''' the xml comment preprocessor to keep the markdown link valid.
+    ''' </summary>
+    ''' <param name="id"></param>
+    ''' <returns></returns>
+    Private Shared Function decodeCrefId(id As String) As String
+        If String.IsNullOrEmpty(id) Then
+            Return id
+        End If
+
+        Return id.Replace("%60", "`").Replace("%25", "%")
+    End Function
+
     Private Function resolveCref(m As Match) As String
-        Dim id As String = m.Groups("id").Value
         Dim text As String = m.Groups("text").Value
+        Dim id As String = decodeCrefId(m.Groups("id").Value)
         Dim url As String = site.ResolveUrl(id)
 
         If String.IsNullOrEmpty(url) Then

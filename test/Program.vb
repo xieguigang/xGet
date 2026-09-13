@@ -11,6 +11,9 @@ Module Program
                 Case "apidoc"
                     Environment.ExitCode = ApiDocTest.Run(args.Skip(1).ToArray)
                     Return
+                Case "xmltrim"
+                    Environment.ExitCode = If(args.Length > 1, ApiDocTest.TrimCheck(args(1)), 2)
+                    Return
             End Select
         End If
 
