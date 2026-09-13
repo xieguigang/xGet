@@ -1,6 +1,5 @@
 Imports System.IO
 Imports System.Text.RegularExpressions
-Imports Microsoft.VisualBasic.ApplicationServices.Development.XmlDoc.Serialization
 Imports Readership
 
 ''' <summary>
@@ -56,32 +55,6 @@ Module ApiDocTest
         Call Console.WriteLine($"validation: {If(ok, "PASS", "FAIL")}")
 
         Return If(ok, 0, 1)
-    End Function
-
-    ''' <summary>
-    ''' temporary diagnostic: apply the xml comment preprocessor and report the
-    ''' first xml syntax error with its source context.
-    ''' </summary>
-    Public Function TrimCheck(path As String) As Integer
-        Dim trimmed$ = APIExtensions.TrimAssemblyDoc(IO.File.ReadAllText(path))
-        Dim document As New System.Xml.XmlDocument
-
-        Try
-            document.LoadXml(trimmed)
-            Call Console.WriteLine("xml is valid")
-            Return 0
-        Catch ex As System.Xml.XmlException
-            Call Console.WriteLine(ex.Message)
-            Call Console.WriteLine($"position: line={ex.LineNumber}, col={ex.LinePosition}")
-
-            Dim lines = trimmed.Replace(vbCrLf, vbLf).Split(CChar(vbLf))
-
-            For i As Integer = Math.Max(0, ex.LineNumber - 5) To Math.Min(lines.Length - 1, ex.LineNumber + 3)
-                Call Console.WriteLine($"{i + 1,7}: {lines(i)}")
-            Next
-
-            Return 1
-        End Try
     End Function
 
     Private Function validate(output As String) As Boolean
