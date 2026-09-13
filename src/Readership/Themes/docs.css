@@ -234,6 +234,14 @@
     color: var(--green);
 }
 
+.eyebrow .crumb {
+    color: var(--ink-faint);
+}
+
+.eyebrow .crumb.on {
+    color: var(--ink);
+}
+
 /* ---- namespace cards ---- */
 
 .ns-grid {

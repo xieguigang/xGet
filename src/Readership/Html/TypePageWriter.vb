@@ -12,8 +12,6 @@ Public Class TypePageWriter
     Public Shared Function Render(ctx As DocSiteContext, t As DocTypeEntry) As String
         Dim md As CommentMarkdown = ctx.Markdown(t.Url)
         Dim src As ProjectType = t.Source
-        Dim base$ = ctx.BaseUrl(t.Url)
-        Dim nsName$ = DocSiteContext.DisplayNamespace(t.ContainingNamespace.Name)
         Dim sb As New StringBuilder
 
         sb.AppendLine($"<p class=""eyebrow""><b>TYPE</b> <span>{ctx.NamespaceBreadcrumb(t.ContainingNamespace.Name, t.Url)} / <span class=""crumb on"">{DocHtml.Escape(DocHtml.DisplayTypeName(t.Name))}</span></span></p>")

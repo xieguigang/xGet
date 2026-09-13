@@ -75,6 +75,7 @@ Module ApiDocTest
         Dim crefExternal As Integer = 0
 
         Call Console.WriteLine($"  html pages: {htmlPages.Length}")
+        Call reportDistribution(root, htmlPages)
 
         For Each htmlFile As String In htmlPages
             Dim html$ = IO.File.ReadAllText(htmlFile)
@@ -132,6 +133,55 @@ Module ApiDocTest
 
         Return problems.Count = 0
     End Function
+
+    ''' <summary>
+    ''' report how the generated pages are distributed in the folders. the pages
+    ''' are grouped into the namespace folders, so the max file count of a single
+    ''' folder should stay small even for a very large project.
+    ''' </summary>
+    ''' <param name="root"></param>
+    ''' <param name="htmlPages"></param>
+    Private Sub reportDistribution(root As String, htmlPages As String())
+        Dim perFolder As New Dictionary(Of String, Integer)(StringComparer.OrdinalIgnoreCase)
+        Dim longest As Integer = 0
+        Dim deepest As Integer = 0
+
+        For Each htmlFile As String In htmlPages
+            Dim folder$ = Path.GetDirectoryName(htmlFile)
+            Dim count As Integer = 0
+
+            If perFolder.TryGetValue(folder, count) Then
+                perFolder(folder) = count + 1
+            Else
+                perFolder(folder) = 1
+            End If
+
+            Dim rel$ = relative(root, htmlFile)
+
+            If rel.Length > longest Then
+                longest = rel.Length
+            End If
+
+            Dim depth As Integer = rel.Split(Path.DirectorySeparatorChar).Length - 1
+
+            If depth > deepest Then
+                deepest = depth
+            End If
+        Next
+
+        Dim maxFiles As Integer = 0
+        Dim maxFolder$ = ""
+
+        For Each item As KeyValuePair(Of String, Integer) In perFolder
+            If item.Value > maxFiles Then
+                maxFiles = item.Value
+                maxFolder = relative(root, item.Key)
+            End If
+        Next
+
+        Call Console.WriteLine($"  folders   : {perFolder.Count} folders, max {maxFiles} html in '{(If(String.IsNullOrEmpty(maxFolder), ".", maxFolder))}'")
+        Call Console.WriteLine($"  path      : max folder depth {deepest}, longest relative path {longest} chars")
+    End Sub
 
     Private Function getIds(cache As Dictionary(Of String, HashSet(Of String)), htmlPath As String, idRegex As Regex) As HashSet(Of String)
         Dim ids As HashSet(Of String) = Nothing
