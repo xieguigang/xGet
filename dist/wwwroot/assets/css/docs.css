@@ -95,6 +95,12 @@
     cursor: default;
 }
 
+/* a namespace node which links to its block of the document index page keeps
+   the pointer cursor, even when it is a leaf node of the namespace tree. */
+.doc-ns > summary a {
+    cursor: pointer;
+}
+
 .doc-ns > summary a {
     color: var(--ink-dim);
     font-size: 12.5px;

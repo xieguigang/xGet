@@ -68,8 +68,11 @@ Module ServerDocsTest
             Dim globalOk As Boolean = checkHtml("global index ", globalHtml, metadata.Id)
             Dim packageOk As Boolean = checkHtml("package index", packageHtml, metadata.Id)
             Dim typeOk As Boolean = checkHtml("type page    ", typeHtml, sample.type_fullname)
+            Dim navOk As Boolean = checkSidebar("global index ", globalHtml) AndAlso
+                checkSidebar("package index", packageHtml) AndAlso
+                checkSidebar("type page    ", typeHtml)
 
-            Dim ok As Boolean = globalOk AndAlso packageOk AndAlso typeOk
+            Dim ok As Boolean = globalOk AndAlso packageOk AndAlso typeOk AndAlso navOk
 
             Call Console.WriteLine()
             Call Console.WriteLine($"server docs validation: {If(ok, "PASS", "FAIL")}")
@@ -102,6 +105,18 @@ Module ServerDocsTest
         Call Console.WriteLine($"  {label}: {html.Length} bytes, shell={hasShell}, contains '{expected}'={hasText}, unresolved={unresolved}")
 
         Return hasShell AndAlso hasText AndAlso unresolved = 0
+    End Function
+
+    ''' <summary>
+    ''' the sidebar namespace nodes must be links to the namespace blocks of the
+    ''' document index page, otherwise the sidebar navigation is dead.
+    ''' </summary>
+    Private Function checkSidebar(label As String, html As String) As Boolean
+        Dim ok As Boolean = Not String.IsNullOrEmpty(html) AndAlso html.Contains("#ns-")
+
+        Call Console.WriteLine($"  {label}: sidebar namespace link present={ok}")
+
+        Return ok
     End Function
 
     Private Function argAt(args As String(), index As Integer, fallback As String) As String

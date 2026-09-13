@@ -55,7 +55,7 @@ Public Module ApiDocRenderer
         Dim model As DocPageModel = common(ctx, base, "API Documentation")
 
         model("content") = globalIndexContent(ctx)
-        model("sidebar") = ctx.Sidebar("", globalIndexUrl)
+        model("sidebar") = ctx.Sidebar("", globalIndexUrl, globalIndexUrl)
         model("breadcrumb") = $"<a href=""{DocHtml.Attr(globalIndexUrl)}"">API Docs</a>"
         model("page_kind") = "global"
         model("title") = "API Documentation"
@@ -80,7 +80,7 @@ Public Module ApiDocRenderer
         Dim version$ = If(ctx.Document.packageVersion, "")
 
         model("content") = packageIndexContent(ctx)
-        model("sidebar") = ctx.Sidebar("", packageIndexUrl)
+        model("sidebar") = ctx.Sidebar("", packageIndexUrl, packageIndexUrl)
         model("breadcrumb") = $"<a href=""{DocHtml.Attr(globalIndexUrl)}"">API Docs</a> / <span class=""crumb on"">{DocHtml.Escape(packageId)}</span>"
         model("page_kind") = "package"
         model("title") = $"{packageId} {version}".Trim()
@@ -109,7 +109,7 @@ Public Module ApiDocRenderer
         Dim version$ = If(t.packageVersion, ctx.Document.packageVersion)
 
         model("content") = TypePageWriter.RenderContent(ctx, t, includeBreadcrumb:=False)
-        model("sidebar") = ctx.Sidebar(t.namespaceName, t.url)
+        model("sidebar") = ctx.Sidebar(t.namespaceName, t.url, packageIndexUrl)
         model("breadcrumb") = $"<a href=""{DocHtml.Attr(globalIndexUrl)}"">API Docs</a> / " &
             $"<a href=""{DocHtml.Attr(packageIndexUrl)}"">{DocHtml.Escape(packageId)}</a> / " &
             $"<span class=""crumb on"">{DocHtml.Escape(DocHtml.DisplayTypeName(t.name))}</span>"
@@ -175,7 +175,7 @@ Public Module ApiDocRenderer
             .GroupBy(Function(t) If(t.namespaceName, "")) _
             .OrderBy(Function(x) x.Key)
 
-            sb.AppendLine($"<section class=""doc-ns-block"">")
+            sb.AppendLine($"<section class=""doc-ns-block"" id=""{DocHtml.Attr(DocNaming.NamespaceAnchor(g.Key))}"">")
             sb.AppendLine($"<h2 class=""doc-ns-title"">{DocHtml.Escape(DocSiteContext.DisplayNamespace(g.Key))}</h2>")
             sb.AppendLine(typeTable(ctx, g.OrderBy(Function(t) t.fullName), showPackage:=True))
             sb.AppendLine("</section>")
@@ -220,7 +220,7 @@ Public Module ApiDocRenderer
             Dim ns As ApiDocNamespace = ctx.Index.FindNamespace(g.Key)
             Dim summary$ = If(ns?.summary, "")
 
-            sb.AppendLine("<section class=""doc-ns-block"">")
+            sb.AppendLine($"<section class=""doc-ns-block"" id=""{DocHtml.Attr(DocNaming.NamespaceAnchor(g.Key))}"">")
             sb.AppendLine($"<h2 class=""doc-ns-title"">{DocHtml.Escape(DocSiteContext.DisplayNamespace(g.Key))}</h2>")
 
             If Not String.IsNullOrWhiteSpace(summary) Then

@@ -374,8 +374,13 @@ Public Class DocSiteContext
     ''' </summary>
     ''' <param name="activeNs">the active namespace full name</param>
     ''' <param name="currentUrl">the url of the current page</param>
+    ''' <param name="indexUrl">
+    ''' the url of the document index page that lists the namespace blocks. It is
+    ''' given by the nuget server side pages (which have no dedicated namespace
+    ''' page), so that a namespace node becomes a link to its index block.
+    ''' </param>
     ''' <returns></returns>
-    Public Function Sidebar(activeNs As String, currentUrl As String) As String
+    Public Function Sidebar(activeNs As String, currentUrl As String, Optional indexUrl As String = Nothing) As String
         Dim tree As FileSystemTree = If(Index, Nothing)?.NamespaceTree
         Dim sb As New StringBuilder
 
@@ -385,14 +390,14 @@ Public Class DocSiteContext
         sb.AppendLine("<nav class=""doc-tree"" id=""doc-tree"">")
 
         If tree Is Nothing OrElse tree.Files Is Nothing OrElse tree.Files.Count = 0 Then
-            sb.AppendLine(SidebarGlobal(currentUrl))
+            sb.AppendLine(SidebarGlobal(currentUrl, indexUrl))
         Else
-            sb.AppendLine(SidebarGlobal(currentUrl))
+            sb.AppendLine(SidebarGlobal(currentUrl, indexUrl))
             sb.AppendLine("<ul class=""doc-children doc-root"">")
 
             For Each node As FileSystemTree In tree.Files.Values.OrderBy(Function(n) n.Name)
                 sb.AppendLine("<li>")
-                sb.AppendLine(RenderNamespaceNode(node, currentUrl, activeNs))
+                sb.AppendLine(RenderNamespaceNode(node, currentUrl, activeNs, indexUrl))
                 sb.AppendLine("</li>")
             Next
 
@@ -409,8 +414,9 @@ Public Class DocSiteContext
     ''' level node of the sidebar tree
     ''' </summary>
     ''' <param name="currentUrl"></param>
+    ''' <param name="indexUrl"></param>
     ''' <returns></returns>
-    Private Function SidebarGlobal(currentUrl As String) As String
+    Private Function SidebarGlobal(currentUrl As String, indexUrl As String) As String
         Dim entry As ApiDocNamespace = If(Index, Nothing)?.FindNamespace("")
 
         If entry Is Nothing Then
@@ -422,10 +428,12 @@ Public Class DocSiteContext
 
         sb.AppendLine("<div class=""doc-global"">")
 
-        If String.IsNullOrEmpty(entry.url) Then
-            sb.AppendLine($"<span class=""doc-node"">(global)</span>")
-        Else
+        If Not String.IsNullOrEmpty(entry.url) Then
             sb.AppendLine($"<a{onAttr} href=""{BaseUrl(currentUrl)}{entry.url}"">(global)</a>")
+        ElseIf Not String.IsNullOrEmpty(indexUrl) Then
+            sb.AppendLine($"<a href=""{DocHtml.Attr(indexUrl & "#" & DocNaming.NamespaceAnchor(""))}"">(global)</a>")
+        Else
+            sb.AppendLine($"<span class=""doc-node"">(global)</span>")
         End If
 
         sb.AppendLine($"<span class=""count"">{Index.TypeCountOf("")}</span>")
@@ -442,8 +450,9 @@ Public Class DocSiteContext
     ''' <param name="node"></param>
     ''' <param name="currentUrl"></param>
     ''' <param name="activeNs"></param>
+    ''' <param name="indexUrl"></param>
     ''' <returns></returns>
-    Private Function RenderNamespaceNode(node As FileSystemTree, currentUrl As String, activeNs As String) As String
+    Private Function RenderNamespaceNode(node As FileSystemTree, currentUrl As String, activeNs As String, indexUrl As String) As String
         Dim fullName$ = DocNaming.NodeFullName(node)
         Dim entry As ApiDocNamespace = If(Index, Nothing)?.FindNamespace(fullName)
         Dim children = node.Files
@@ -459,6 +468,10 @@ Public Class DocSiteContext
         If entry IsNot Nothing AndAlso Not String.IsNullOrEmpty(entry.url) Then
             Dim onAttr$ = If(String.Equals(entry.url, currentUrl, StringComparison.OrdinalIgnoreCase), " class=""on""", "")
             sb.AppendLine($"<a{onAttr} href=""{BaseUrl(currentUrl)}{entry.url}"" title=""{DocHtml.Attr(fullName)}"">{DocHtml.Escape(node.Name)}</a>")
+        ElseIf Not String.IsNullOrEmpty(indexUrl) Then
+            ' the server side document pages have no dedicated namespace page, so
+            ' the namespace node links to its block inside the document index page.
+            sb.AppendLine($"<a href=""{DocHtml.Attr(indexUrl & "#" & DocNaming.NamespaceAnchor(fullName))}"" title=""{DocHtml.Attr(fullName)}"">{DocHtml.Escape(node.Name)}</a>")
         Else
             sb.AppendLine($"<span class=""doc-node"" title=""{DocHtml.Attr(fullName)}"">{DocHtml.Escape(node.Name)}</span>")
         End If
@@ -496,7 +509,7 @@ Public Class DocSiteContext
 
             For Each child As FileSystemTree In children.Values.OrderBy(Function(n) n.Name)
                 sb.AppendLine("<li>")
-                sb.AppendLine(RenderNamespaceNode(child, currentUrl, activeNs))
+                sb.AppendLine(RenderNamespaceNode(child, currentUrl, activeNs, indexUrl))
                 sb.AppendLine("</li>")
             Next
 

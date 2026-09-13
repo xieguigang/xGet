@@ -208,6 +208,17 @@ Public Module DocNaming
     End Function
 
     ''' <summary>
+    ''' the html anchor of a namespace block inside a document index page, it is
+    ''' used by the sidebar navigation of the server side document pages (which
+    ''' have no dedicated namespace page).
+    ''' </summary>
+    ''' <param name="namespaceName"></param>
+    ''' <returns></returns>
+    Public Function NamespaceAnchor(namespaceName As String) As String
+        Return "ns-" & NamespaceFolder(namespaceName).Replace("/"c, "-"c)
+    End Function
+
+    ''' <summary>
     ''' the full namespace name of a namespace tree node, it is built by walking
     ''' up the <see cref="FileSystemTree.Parent"/> chain.
     ''' </summary>

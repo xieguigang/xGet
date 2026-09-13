@@ -288,7 +288,8 @@ xGet batch    --server http://localhost:80 --email me@example.com --dir ./packag
 依赖库全部本地化于 `assets/vendor/`：`echarts`、`echarts-wordcloud`、`echarts-gl@2.0.9`、`marked@12.0.2`，
 以及保留备用的 `3d-force-graph`、`three.min.js`。样式沿用 scibasic.net 的暗色风格（`assets/css/scibasic.css`）。
 
-API 文档页（`/docs/...`）由服务端渲染，不属于静态页面：其 html 模板放在 `dist/template/`，
+API 文档页（`/docs/...`）由服务端渲染，不属于静态页面；静态页面的顶部导航通过相对链接
+`docs/index.html` 指向全局文档索引。文档页的 html 模板放在 `dist/template/`，
 样式与交互放在 `dist/wwwroot/assets/css/docs.css` 与 `dist/wwwroot/assets/js/docs.js`
 （`docs.js` 提供命名空间树筛选、侧栏折叠与锚点平滑跳转），两者都可以直接替换而无需重新编译。
 
@@ -386,7 +387,12 @@ Dim document = extracted.Document
 
 三类页面都在服务端渲染后返回完整 html（伪静态），页面外壳来自可替换模板
 `dist/template/docs-index.html`、`docs-package.html`、`docs-type.html`；模板缺失时回退内置最小模板并记录警告。
-`package.html` 通过 `/api/package/{id}` 响应中的 `docs` 字段渲染「API Documentation」跳转链接。
+`package.html` 通过 `/api/package/{id}` 响应中的 `docs` 字段渲染「API Documentation」跳转链接；
+站点所有静态页面的顶部导航（Packages / Statistics / Graphs / **API Docs** / Service Index）都提供了 `/docs/index.html` 入口。
+
+文档页左侧侧栏：由于 nuget 文档没有独立的命名空间页，命名空间树中的节点会跳到
+「文档索引页中该命名空间对应的区块」（`.../index.html#ns-<namespace>`），当前类型的命名空间下还会列出
+可直接跳转的类型叶子节点。
 
 自检：`dotnet run --project test/test.vbproj -- serverdocs [nupkg] [template]`
 （提取 → 入库 → 重建文档模型 → 渲染三类页面，全程不启动 http 服务）。
