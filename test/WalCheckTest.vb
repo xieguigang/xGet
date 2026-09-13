@@ -21,17 +21,19 @@ Module WalCheckTest
         Dim waitSeconds As Integer = argInt(args, 1, 20)
         Dim root As String = Path.Combine(Path.GetTempPath(), "xdoc-walcheck-" & Guid.NewGuid().ToString("N"))
 
-        Call Console.WriteLine($"idle threshold : {idleSeconds}s")
-        Call Console.WriteLine($"idle wait      : {waitSeconds}s")
-        Call Console.WriteLine($"database root  : {root}")
-        Call Console.WriteLine()
-
         Dim options As New StorageOptions With {
             .MergeIdleSeconds = idleSeconds,
             .MergeAfterOperations = 100000,
             .Verbose = True
         }
         Dim engine As New SqlEngine(root, options)
+
+        Call Console.WriteLine($"idle threshold : {idleSeconds}s")
+        Call Console.WriteLine($"idle wait      : {waitSeconds}s")
+        Call Console.WriteLine($"engine options : MergeIdleSeconds={engine.Storage.MergeIdleSeconds} MergeAfterOperations={engine.Storage.MergeAfterOperations}")
+        Call Console.WriteLine($"database root  : {root}")
+        Call Console.WriteLine()
+
 
         AddHandler engine.CheckpointScheduler.Info, AddressOf onCheckpointInfo
         AddHandler engine.Sessions.Info, AddressOf onSessionInfo
@@ -63,6 +65,8 @@ Module WalCheckTest
             Dim mergedByScheduler As Boolean = fileSize(Path.Combine(dir, "t.jsonl")) > 0
             Call report(engine, dir, "after the idle window")
 
+            Call Console.WriteLine($"scheduler state: {engine.CheckpointScheduler}")
+
             If mergedByScheduler Then
                 Call Console.WriteLine("result         : the background checkpoint merged the WAL")
             Else
@@ -77,6 +81,8 @@ Module WalCheckTest
             If engine.CheckpointScheduler.LastError IsNot Nothing Then
                 Call Console.WriteLine($"last error     : {engine.CheckpointScheduler.LastError}")
             End If
+
+            Call Console.WriteLine($"scheduler state: {engine.CheckpointScheduler}")
 
             Call flushMessages()
 

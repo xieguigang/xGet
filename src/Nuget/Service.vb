@@ -35,6 +35,13 @@ Public Class Service
     ''' </summary>
     Private analysisTimer As System.Threading.Timer
 
+    ''' <summary>
+    ''' the timer driving the periodic database checkpoint. the instance is kept
+    ''' in a field because an unreferenced timer would be garbage collected and
+    ''' the periodic task would silently stop.
+    ''' </summary>
+    Private checkpointTimer As System.Threading.Timer
+
     Public Sub Mount(router As HttpRouter, config As IReadOnlyDictionary(Of String, String)) Implements IHttpAppModule.Mount
         Me.router = router
         Me.config = NugetConfiguration.FromConfig(config)
@@ -43,7 +50,7 @@ Public Class Service
         Call Directory.CreateDirectory(Me.config.PackageDirectory)
         Call Directory.CreateDirectory(Me.config.DatabaseDirectory)
 
-        Me.store = New NugetStore(Me.config.DatabaseDirectory)
+        Me.store = New NugetStore(Me.config.DatabaseDirectory, Me.config.CreateStorageOptions())
         Me.auth = New TotpAuth(Me.store)
 
         Call $"nuget server data directory: {Me.config.DataDirectory}".info()
@@ -61,6 +68,34 @@ Public Class Service
         Else
             Call "package cluster analysis is disabled by the configuration".info()
         End If
+
+        ' a low frequency explicit checkpoint: it merges the write ahead logs of
+        ' the database even when the engine never stays idle long enough for its
+        ' own background checkpoint, so the wal files can not grow forever.
+        Me.checkpointTimer = New System.Threading.Timer(
+            AddressOf checkpointTick,
+            Nothing,
+            dueTime:=TimeSpan.FromSeconds(Me.config.DbCheckpointSeconds),
+            period:=TimeSpan.FromSeconds(Me.config.DbCheckpointSeconds))
+
+        Call $"database checkpoint scheduled: every {Me.config.DbCheckpointSeconds} second(s), idle merge after {Me.config.DbMergeIdleSeconds}s".info()
+    End Sub
+
+    ''' <summary>
+    ''' the periodic database checkpoint: merge the pending write ahead logs. every
+    ''' exception is swallowed (and logged) so that the background task can never
+    ''' take the server down.
+    ''' </summary>
+    Private Sub checkpointTick(state As Object)
+        Try
+            Dim merged As Integer = store.Checkpoint()
+
+            If merged > 0 Then
+                Call $"database checkpoint: merged {merged} table(s)".debug()
+            End If
+        Catch ex As Exception
+            Call App.LogException(ex)
+        End Try
     End Sub
 
     ''' <summary>

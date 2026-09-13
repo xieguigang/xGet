@@ -1,6 +1,7 @@
 Imports System.Collections.Generic
 Imports System.Globalization
 Imports System.IO
+Imports JSql.Storage
 
 ''' <summary>
 ''' runtime configuration of the experimental nuget server module.
@@ -79,14 +80,40 @@ Public Class NugetConfiguration
     ''' </summary>
     Public ReadOnly Property ClusterNeighbors As Integer
 
+    ''' <summary>
+    ''' how many seconds the JSql engine has to stay idle before its background
+    ''' checkpoint merges the pending write ahead log into the data files.
+    ''' configuration key ``db-merge-idle-seconds``, default 30.
+    ''' </summary>
+    Public ReadOnly Property DbMergeIdleSeconds As Integer
+
+    ''' <summary>
+    ''' the number of the pending write ahead log operations which force a merge
+    ''' even when the engine is not idle. configuration key
+    ''' ``db-merge-operations``, default 2000.
+    ''' </summary>
+    Public ReadOnly Property DbMergeOperations As Integer
+
+    ''' <summary>
+    ''' the interval in seconds of the explicit ``CHECKPOINT`` job which merges
+    ''' the write ahead logs as a fall back of the background checkpoint.
+    ''' configuration key ``db-checkpoint-seconds``, default 300.
+    ''' </summary>
+    Public ReadOnly Property DbCheckpointSeconds As Integer
+
     Public Const DefaultClusterK As Integer = 6
     Public Const DefaultClusterIntervalMinutes As Integer = 30
     Public Const DefaultClusterMinSamples As Integer = 3
     Public Const DefaultClusterNeighbors As Integer = 15
 
+    Public Const DefaultDbMergeIdleSeconds As Integer = 30
+    Public Const DefaultDbMergeOperations As Integer = 2000
+    Public Const DefaultDbCheckpointSeconds As Integer = 300
+
     Private Sub New(data As String, packages As String, database As String, wwwroot As String, template As String, baseUrl As String,
                     clusterEnabled As Boolean, clusterK As Integer, clusterIntervalMinutes As Integer,
-                    clusterMinSamples As Integer, clusterNeighbors As Integer)
+                    clusterMinSamples As Integer, clusterNeighbors As Integer,
+                    dbMergeIdleSeconds As Integer, dbMergeOperations As Integer, dbCheckpointSeconds As Integer)
 
         Me.DataDirectory = data
         Me.PackageDirectory = packages
@@ -99,7 +126,24 @@ Public Class NugetConfiguration
         Me.ClusterIntervalMinutes = clusterIntervalMinutes
         Me.ClusterMinSamples = clusterMinSamples
         Me.ClusterNeighbors = clusterNeighbors
+        Me.DbMergeIdleSeconds = dbMergeIdleSeconds
+        Me.DbMergeOperations = dbMergeOperations
+        Me.DbCheckpointSeconds = dbCheckpointSeconds
     End Sub
+
+    ''' <summary>
+    ''' build the JSql storage options of this server instance, so that the
+    ''' checkpoint behaviour of the write ahead log could be tuned without a
+    ''' rebuild.
+    ''' </summary>
+    ''' <returns></returns>
+    Public Function CreateStorageOptions() As StorageOptions
+        Return New StorageOptions With {
+            .MergeIdleSeconds = DbMergeIdleSeconds,
+            .MergeAfterOperations = DbMergeOperations,
+            .FsyncEachWrite = False
+        }
+    End Function
 
     ''' <summary>
     ''' build the configuration from the host supplied configuration dictionary.
@@ -144,7 +188,10 @@ Public Class NugetConfiguration
             intValue(config, "cluster-k", DefaultClusterK, 2, 64),
             intValue(config, "cluster-interval", DefaultClusterIntervalMinutes, 1, 1440),
             intValue(config, "cluster-min-samples", DefaultClusterMinSamples, 2, 10000),
-            intValue(config, "cluster-neighbors", DefaultClusterNeighbors, 2, 256))
+            intValue(config, "cluster-neighbors", DefaultClusterNeighbors, 2, 256),
+            intValue(config, "db-merge-idle-seconds", DefaultDbMergeIdleSeconds, 5, 3600),
+            intValue(config, "db-merge-operations", DefaultDbMergeOperations, 1, 1000000),
+            intValue(config, "db-checkpoint-seconds", DefaultDbCheckpointSeconds, 30, 86400))
     End Function
 
     Private Shared Function getValue(config As IReadOnlyDictionary(Of String, String), name As String) As String

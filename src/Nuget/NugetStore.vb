@@ -3,6 +3,7 @@ Imports System.Globalization
 Imports System.Linq
 Imports System.Text
 Imports JSql.Engine
+Imports JSql.Storage
 
 ''' <summary>
 ''' a registered nuget server user. the <see cref="salt"/> is a 128 characters
@@ -158,10 +159,23 @@ Public Class NugetStore
     Private ReadOnly engine As SqlEngine
     Private ReadOnly sync As New Object
 
-    Public Sub New(databaseDirectory As String)
-        Me.engine = New SqlEngine(databaseDirectory)
+    Public Sub New(databaseDirectory As String, Optional options As StorageOptions = Nothing)
+        Me.engine = New SqlEngine(databaseDirectory, options)
         Call initialize()
     End Sub
+
+    ''' <summary>
+    ''' merge the pending write ahead logs of every open table back into their
+    ''' data files. It is the explicit fall back of the background checkpoint of
+    ''' the engine: the host calls it from a low frequency timer so that the wal
+    ''' files are merged even when the engine never becomes idle.
+    ''' </summary>
+    ''' <returns>the number of the merged tables.</returns>
+    Public Function Checkpoint() As Integer
+        SyncLock sync
+            Return engine.MergeAll(force:=False)
+        End SyncLock
+    End Function
 
     Private Sub initialize()
         SyncLock sync

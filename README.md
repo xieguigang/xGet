@@ -77,6 +77,9 @@ dotnet run --project test/test.vbproj -- apidoc "./dist/bin" "./dist/docs" sciba
 
 # 服务端文档页自检（提取 → 入库 → 重建 → 模板渲染，不启动 http 服务）
 dotnet run --project test/test.vbproj -- serverdocs
+
+# JSql WAL 落盘自检（写入 → 空闲 → 确认 WAL 已合并回数据文件）
+dotnet run --project test/test.vbproj -- walcheck [idleSeconds] [waitSeconds]
 ```
 
 外部依赖（通过 `ProjectReference` 引用，需存在对应代码库）：
@@ -128,6 +131,11 @@ Fluteway /run --app ./Nuget.dll --listen=80 --wwwroot="../wwwroot"
 ## 4. 配置键（`--config` ini 或配置字典）
 
 ```ini
+; 数据库检查点（JSql 写前日志 WAL）
+db-merge-idle-seconds=30     ; 引擎空闲多少秒后，后台 checkpoint 把 WAL 合并回数据文件
+db-merge-operations=2000     ; WAL 挂起操作数达到该值即强制合并，不再等待空闲
+db-checkpoint-seconds=300    ; 显式 CHECKPOINT 兜底任务的间隔（秒）
+
 ; 路径
 data=./data
 packages=./data/packages
@@ -262,6 +270,12 @@ xGet batch    --server http://localhost:80 --email me@example.com --dir ./packag
 | `statistics` | 预计算统计文档：`tags`、`tag-network`、`dependency-network`、`package-clusters`、`cluster-state` |
 
 > JSql 无参数化/事务/自增/BLOB，且非线程安全；本项目在 `NugetStore` 内用 `SyncLock` 串行化所有访问，并对字符串做手工转义。
+
+> **写前日志（WAL）**：JSql 的行式表采用「`<table>.jsonl` 数据文件 + `<table>.jsonl.wal` 写前日志」。
+> 写入先落 WAL，引擎空闲 `db-merge-idle-seconds` 秒后由后台 checkpoint 合并回数据文件，另外每
+> `db-checkpoint-seconds` 秒由服务端显式 `CHECKPOINT` 兜底一次。因此**未合并时数据文件可能为 0 字节**，
+> 这并不代表数据丢失（重启时会重放 WAL 恢复）。可用 `dotnet run --project test/test.vbproj -- walcheck [idleSeconds] [waitSeconds]`
+> 自检：写入若干行后空转等待，若落盘正常则数据文件非空且 `.wal` 被清零。
 
 ---
 
