@@ -8,6 +8,7 @@
 .doc-shell {
     display: grid;
     grid-template-columns: 250px minmax(0, 1fr);
+    column-gap: 32px;
     align-items: start;
     width: 90%;
     max-width: none;
@@ -15,21 +16,18 @@
     padding: 0;
 }
 
+/* the height of the sidebar is not limited: it grows with the namespace tree
+   and the whole page shares a single scrollbar. */
 .doc-side {
-    position: sticky;
-    top: 79px;
-    max-height: calc(100vh - 79px);
-    overflow-y: auto;
+    position: static;
+    max-height: none;
+    overflow: visible;
     padding: 24px 20px 40px 0;
     border-right: 1px solid var(--hairline2);
 }
 
 .doc-side-head {
-    position: sticky;
-    top: 0;
-    z-index: 2;
     padding-bottom: 10px;
-    background: var(--bg);
 }
 
 .doc-filter {
@@ -526,9 +524,12 @@ section.member:hover .anchor {
 
 /* ---- parameter tables ---- */
 
-.param-table th:first-child,
 .param-table td.pname {
-    width: 240px;
+    width: 210px;
+}
+
+.param-table td.ptype {
+    width: 300px;
 }
 
 .pname code {
@@ -548,7 +549,8 @@ section.member:hover .anchor {
 
 /* ---- cref links ---- */
 
-code.cref {
+code.cref,
+code.sig-type {
     padding: 2px 5px;
     border: 1px solid var(--hairline2);
     border-radius: 2px;
@@ -568,6 +570,46 @@ a.cref:hover {
     border-color: var(--green);
 }
 
+/* ---- a type reference inside a signature block ---- */
+
+.sig code.sig-type {
+    padding: 1px 4px;
+    font-size: 12px;
+}
+
+.sig a.cref {
+    padding: 0 1px;
+    font-size: 12px;
+}
+
+.ptype code.sig-type,
+.ptype a.cref {
+    font-size: 12px;
+}
+
+/* ---- sidebar collapse (the state is remembered in the localStorage) ---- */
+
+.topbar-tools {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.doc-toggle {
+    padding: 0;
+    background: transparent;
+    font-family: var(--sans);
+    cursor: pointer;
+}
+
+html.side-collapsed .doc-shell {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+html.side-collapsed .doc-side {
+    display: none;
+}
+
 /* ---- responsive ---- */
 
 @media (max-width: 1000px) {
@@ -578,8 +620,6 @@ a.cref:hover {
     }
 
     .doc-side {
-        position: static;
-        max-height: 260px;
         margin-bottom: 10px;
         padding-right: 0;
         border-right: 0;

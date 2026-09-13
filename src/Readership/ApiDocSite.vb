@@ -41,6 +41,39 @@ Public Class DocNamespaceEntry
     Public Property Summary As String
 
     Public ReadOnly Property Types As New List(Of DocTypeEntry)
+
+    ''' <summary>
+    ''' the namespace document texts which are collected from the ``NamespaceDoc``
+    ''' magic type of this namespace
+    ''' </summary>
+    Private ReadOnly namespaceDoc As New List(Of String)
+
+    ''' <summary>
+    ''' the ``NamespaceDoc`` type only carries the documentation of its namespace,
+    ''' so its comment text is merged into the namespace instead of being generated
+    ''' as an independent type page.
+    ''' </summary>
+    ''' <param name="type"></param>
+    Friend Sub AddNamespaceDoc(type As ProjectType)
+        If type Is Nothing Then
+            Return
+        End If
+
+        If Not String.IsNullOrWhiteSpace(type.Summary) Then
+            Call namespaceDoc.Add(type.Summary.Trim())
+        End If
+
+        If Not String.IsNullOrWhiteSpace(type.Remarks) Then
+            Call namespaceDoc.Add(type.Remarks.Trim())
+        End If
+    End Sub
+
+    ''' <summary>
+    ''' write the collected namespace document texts into the <see cref="Summary"/>
+    ''' </summary>
+    Friend Sub SealNamespaceDoc()
+        Summary = namespaceDoc.Distinct().JoinBy(vbLf & vbLf)
+    End Sub
 End Class
 
 ''' <summary>
@@ -275,7 +308,6 @@ Public Class ApiDocSite
                     .Name = namespaceName,
                     .Project = proj.Name,
                     .Source = ns,
-                    .Summary = namespaceSummary(ns),
                     .Url = NamespaceUrl(namespaceName, nsUrls)
                 }
 
@@ -288,6 +320,14 @@ Public Class ApiDocSite
                 For Each t As ProjectType In ns.Types _
                     .Where(Function(x) x IsNot Nothing) _
                     .OrderBy(Function(x) x.Name)
+
+                    ' the NamespaceDoc magic type carries the documentation of its
+                    ' namespace, so it is merged into the namespace entry and it is
+                    ' not generated as an independent type page.
+                    If String.Equals(t.Name, APIExtensions.NamespaceDoc, StringComparison.Ordinal) Then
+                        Call nsEntry.AddNamespaceDoc(t)
+                        Continue For
+                    End If
 
                     Dim fullName$ = If(String.IsNullOrEmpty(namespaceName), t.Name, namespaceName & "." & t.Name)
                     Dim typeEntry As New DocTypeEntry With {
@@ -304,6 +344,7 @@ Public Class ApiDocSite
                     Call site.Types.Add(typeEntry)
                 Next
 
+                Call nsEntry.SealNamespaceDoc()
                 Call site.Namespaces.Add(nsEntry)
             Next
         Next
@@ -471,15 +512,6 @@ Public Class ApiDocSite
 
         NamespaceTypeCount("") = globalCount
     End Sub
-
-    Private Shared Function namespaceSummary(ns As ProjectNamespace) As String
-        Return ns.Types _
-            .Where(Function(t) t IsNot Nothing AndAlso t.Name = APIExtensions.NamespaceDoc) _
-            .Select(Function(t) t.Summary) _
-            .Where(Function(s) Not String.IsNullOrWhiteSpace(s)) _
-            .Distinct _
-            .JoinBy(vbLf & vbLf)
-    End Function
 
     Private Shared Sub buildMembers(typeEntry As DocTypeEntry)
         Dim src As ProjectType = typeEntry.Source
@@ -649,6 +681,229 @@ Public Class ApiDocSite
         End While
 
         Return names.JoinBy(".")
+    End Function
+
+    ''' <summary>
+    ''' split the parameter type list from a member declare text, for example
+    ''' ``Ns.Type.Method(System.String,System.Int32)`` =&gt;
+    ''' ``{System.String, System.Int32}``.
+    ''' </summary>
+    ''' <param name="declareText"></param>
+    ''' <returns></returns>
+    Public Shared Function ParseParameterTypes(declareText As String) As String()
+        If String.IsNullOrWhiteSpace(declareText) Then
+            Return {}
+        End If
+
+        Dim openIndex As Integer = declareText.IndexOf("("c)
+
+        If openIndex < 0 Then
+            Return {}
+        End If
+
+        Dim closeIndex As Integer = declareText.LastIndexOf(")"c)
+
+        If closeIndex <= openIndex + 1 Then
+            Return {}
+        End If
+
+        Return splitTopLevel(declareText.Substring(openIndex + 1, closeIndex - openIndex - 1))
+    End Function
+
+    ''' <summary>
+    ''' convert a doc id type reference into a ``cref`` identity, the array /
+    ''' byref / pointer suffix and the generic arguments are handled, for example
+    ''' ``System.Collections.Generic.Dictionary{System.String,System.Object}``
+    ''' =&gt; ``T:System.Collections.Generic.Dictionary`2``.
+    ''' </summary>
+    ''' <param name="typeReference"></param>
+    ''' <returns></returns>
+    Public Shared Function TypeCref(typeReference As String) As String
+        Dim name$ = stripTypeSuffix(typeReference)
+
+        If name.Length = 0 Then
+            Return Nothing
+        End If
+
+        Dim openIndex As Integer = name.IndexOf("{"c)
+
+        If openIndex > 0 Then
+            name = name.Substring(0, openIndex) & "`" & countGenericArguments(name, openIndex).ToString
+        End If
+
+        Return "T:" & name
+    End Function
+
+    ''' <summary>
+    ''' the vb style display text of a doc id type reference, for example
+    ''' ``Dictionary{System.String,System.Object}`` =&gt;
+    ''' ``Dictionary(Of String, Object)`` and ``System.String[]`` =&gt; ``String()``.
+    ''' </summary>
+    ''' <param name="typeReference"></param>
+    ''' <returns></returns>
+    Public Shared Function DisplayTypeReference(typeReference As String) As String
+        Dim name$ = If(typeReference, "").Trim()
+
+        If name.Length = 0 Then
+            Return ""
+        End If
+
+        If name.EndsWith("[]", StringComparison.Ordinal) Then
+            Return DisplayTypeReference(name.Substring(0, name.Length - 2)) & "()"
+        End If
+
+        If name.EndsWith("*", StringComparison.Ordinal) OrElse name.EndsWith("@"c) Then
+            Return DisplayTypeReference(name.Substring(0, name.Length - 1))
+        End If
+
+        Dim openIndex As Integer = name.IndexOf("{"c)
+
+        If openIndex > 0 AndAlso name.EndsWith("}", StringComparison.Ordinal) Then
+            Dim arguments$ = name.Substring(openIndex + 1, name.Length - openIndex - 2)
+            Dim parts = splitTopLevel(arguments)
+
+            Return ShortTypeName(name.Substring(0, openIndex)) &
+                "(Of " & parts.Select(AddressOf DisplayTypeReference).JoinBy(", ") & ")"
+        End If
+
+        Return ShortTypeName(name)
+    End Function
+
+    ''' <summary>
+    ''' the short name of a clr type name, the generic arity suffix and the
+    ''' explicit interface separator are removed.
+    ''' </summary>
+    ''' <param name="name"></param>
+    ''' <returns></returns>
+    Public Shared Function ShortTypeName(name As String) As String
+        Dim bare$ = If(name, "").Trim()
+        Dim p As Integer = bare.LastIndexOf("."c)
+
+        If p >= 0 Then
+            bare = bare.Substring(p + 1)
+        End If
+
+        p = bare.IndexOf("`"c)
+
+        If p > 0 Then
+            bare = bare.Substring(0, p)
+        End If
+
+        If bare.Contains("#") Then
+            bare = bare.Replace("#", ".")
+        End If
+
+        Return bare
+    End Function
+
+    ''' <summary>
+    ''' split a comma separated list by the top level comma, the comma inside the
+    ''' generic arguments or the nested braces is not a separator.
+    ''' </summary>
+    ''' <param name="text"></param>
+    ''' <returns></returns>
+    Private Shared Function splitTopLevel(text As String) As String()
+        Dim parts As New List(Of String)
+        Dim depth As Integer = 0
+        Dim token As New StringBuilder
+
+        For Each c As Char In If(text, "")
+            Select Case c
+                Case "{"c, "("c, "["c
+                    depth += 1
+                    Call token.Append(c)
+                Case "}"c, ")"c, "]"c
+                    depth -= 1
+                    Call token.Append(c)
+                Case ","c
+                    If depth = 0 Then
+                        Call addToken(parts, token)
+                    Else
+                        Call token.Append(c)
+                    End If
+                Case Else
+                    Call token.Append(c)
+            End Select
+        Next
+
+        Call addToken(parts, token)
+
+        Return parts.ToArray
+    End Function
+
+    Private Shared Sub addToken(parts As List(Of String), token As StringBuilder)
+        Dim text$ = token.ToString.Trim()
+        Call token.Clear()
+
+        If text.Length > 0 Then
+            Call parts.Add(text)
+        End If
+    End Sub
+
+    ''' <summary>
+    ''' remove the array / byref / pointer suffix of a doc id type reference
+    ''' </summary>
+    ''' <param name="typeReference"></param>
+    ''' <returns></returns>
+    Private Shared Function stripTypeSuffix(typeReference As String) As String
+        Dim name$ = If(typeReference, "").Trim()
+
+        While name.Length > 0
+            If name.EndsWith("[]", StringComparison.Ordinal) Then
+                name = name.Substring(0, name.Length - 2).Trim()
+            ElseIf name.EndsWith("*", StringComparison.Ordinal) OrElse name.EndsWith("@"c) Then
+                name = name.Substring(0, name.Length - 1).Trim()
+            Else
+                Exit While
+            End If
+        End While
+
+        Return name
+    End Function
+
+    ''' <summary>
+    ''' count the top level arguments of the first generic argument group
+    ''' </summary>
+    ''' <param name="name"></param>
+    ''' <param name="openIndex"></param>
+    ''' <returns></returns>
+    Private Shared Function countGenericArguments(name As String, openIndex As Integer) As Integer
+        Dim depth As Integer = 0
+        Dim count As Integer = 0
+        Dim hasArgument As Boolean = False
+
+        For i As Integer = openIndex To name.Length - 1
+            Dim c As Char = name(i)
+
+            Select Case c
+                Case "{"c
+                    depth += 1
+
+                    If depth = 1 Then
+                        hasArgument = False
+                    End If
+                Case "}"c
+                    If depth = 1 AndAlso hasArgument Then
+                        count += 1
+                    End If
+
+                    depth -= 1
+
+                    If depth = 0 Then
+                        Exit For
+                    End If
+                Case ","c
+                    If depth = 1 Then
+                        count += 1
+                    End If
+                Case Else
+                    If depth = 1 AndAlso Not Char.IsWhiteSpace(c) Then
+                        hasArgument = True
+                    End If
+            End Select
+        Next
+
+        Return Math.Max(count, 1)
     End Function
 
     Private Shared Function StripParams(name As String) As String

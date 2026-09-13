@@ -73,6 +73,7 @@ Module ApiDocTest
         Dim problems As New List(Of String)
         Dim crefResolved As Integer = 0
         Dim crefExternal As Integer = 0
+        Dim paramTypeCells As Integer = 0
 
         Call Console.WriteLine($"  html pages: {htmlPages.Length}")
         Call reportDistribution(root, htmlPages)
@@ -87,6 +88,13 @@ Module ApiDocTest
 
             crefResolved += Regex.Matches(html, "<a class=""cref""").Count
             crefExternal += Regex.Matches(html, "<code class=""cref""").Count
+            paramTypeCells += Regex.Matches(html, "<td class=""ptype"">").Count
+
+            ' the NamespaceDoc magic type only carries the document of its namespace,
+            ' it must not be generated as an independent type page.
+            If String.Equals(Path.GetFileNameWithoutExtension(htmlFile), "NamespaceDoc", StringComparison.Ordinal) Then
+                Call problems.Add($"{relative(root, htmlFile)}: the NamespaceDoc magic type is generated as an independent page")
+            End If
 
             For Each m As Match In hrefRegex.Matches(html)
                 Dim href$ = m.Groups("u").Value
@@ -125,6 +133,7 @@ Module ApiDocTest
         Next
 
         Call Console.WriteLine($"  cref links: {crefResolved} resolved, {crefExternal} external")
+        Call Console.WriteLine($"  parameters: {paramTypeCells} parameter type links")
         Call Console.WriteLine($"  problems  : {problems.Count}")
 
         For i As Integer = 0 To Math.Min(problems.Count, 30) - 1

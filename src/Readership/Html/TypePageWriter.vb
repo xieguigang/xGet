@@ -36,7 +36,7 @@ Public Class TypePageWriter
             sb.AppendLine("</div>")
         End If
 
-        sb.AppendLine(paramTable(md, src.TypeParams, "Type Parameters"))
+        sb.AppendLine(paramTable(ctx, t.Url, md, src.TypeParams, "Type Parameters"))
 
         sb.AppendLine("<p class=""sec-label""><b>01</b> <span>Syntax</span></p>")
         sb.AppendLine($"<div class=""sig ws-pre"">{DocHtml.Escape(t.FullName)}</div>")
@@ -52,7 +52,7 @@ Public Class TypePageWriter
         sb.AppendLine($"<p class=""sec-label""><b>{no.ToString("00")}</b> <span>Members</span></p>")
 
         For Each m As DocMemberEntry In t.Members
-            sb.AppendLine(memberBlock(t, m, md))
+            sb.AppendLine(memberBlock(ctx, t, m, md))
         Next
 
         sb.AppendLine("</section>")
@@ -89,8 +89,9 @@ Public Class TypePageWriter
         Return no + 1
     End Function
 
-    Private Shared Function memberBlock(t As DocTypeEntry, m As DocMemberEntry, md As CommentMarkdown) As String
+    Private Shared Function memberBlock(ctx As DocSiteContext, t As DocTypeEntry, m As DocMemberEntry, md As CommentMarkdown) As String
         Dim src As ProjectMember = m.Source
+        Dim paramTypes$() = ApiDocSite.ParseParameterTypes(m.DeclareText)
         Dim sb As New StringBuilder
 
         sb.AppendLine($"<section class=""member member-{m.KindName}"" id=""{DocHtml.Attr(m.Anchor)}"">")
@@ -104,7 +105,7 @@ Public Class TypePageWriter
 
         sb.AppendLine($"<a class=""anchor"" href=""#{DocHtml.Attr(m.Anchor)}"" title=""link to this member"">#</a>")
         sb.AppendLine("</div>")
-        sb.AppendLine($"<div class=""sig ws-pre"">{DocHtml.Escape(m.Signature(t))}</div>")
+        sb.AppendLine($"<div class=""sig"">{ctx.MemberSignature(t, m, t.Url)}</div>")
 
         If Not String.IsNullOrWhiteSpace(src.Summary) Then
             sb.AppendLine($"<div class=""member-body"">{md.ToHtml(src.Summary)}</div>")
@@ -115,8 +116,8 @@ Public Class TypePageWriter
             sb.AppendLine($"<div class=""member-body"">{md.ToHtml(src.Remarks)}</div>")
         End If
 
-        sb.AppendLine(paramTable(md, src.TypeParams, "Type Parameters"))
-        sb.AppendLine(paramTable(md, src.Params, "Parameters"))
+        sb.AppendLine(paramTable(ctx, t.Url, md, src.TypeParams, "Type Parameters"))
+        sb.AppendLine(paramTable(ctx, t.Url, md, src.Params, "Parameters", paramTypes))
 
         If Not String.IsNullOrWhiteSpace(src.Returns) Then
             sb.AppendLine("<div class=""sub-label"">Returns</div>")
@@ -133,18 +134,45 @@ Public Class TypePageWriter
         Return sb.ToString
     End Function
 
-    Private Shared Function paramTable(md As CommentMarkdown, items As param(), title As String) As String
+    ''' <summary>
+    ''' render the parameter table. when the <paramref name="typeRefs"/> is given,
+    ''' an extra ``Type`` column with the type page links is rendered.
+    ''' </summary>
+    ''' <param name="ctx"></param>
+    ''' <param name="pageUrl"></param>
+    ''' <param name="md"></param>
+    ''' <param name="items"></param>
+    ''' <param name="title"></param>
+    ''' <param name="typeRefs"></param>
+    ''' <returns></returns>
+    Private Shared Function paramTable(ctx As DocSiteContext, pageUrl As String, md As CommentMarkdown, items As param(), title As String, Optional typeRefs As String() = Nothing) As String
         If items Is Nothing OrElse items.Length = 0 Then
             Return ""
         End If
 
+        Dim hasTypes As Boolean = typeRefs IsNot Nothing AndAlso typeRefs.Length > 0
         Dim sb As New StringBuilder
 
         sb.AppendLine($"<div class=""sub-label"">{DocHtml.Escape(title)}</div>")
-        sb.AppendLine("<div class=""tablewrap""><table class=""param-table""><thead><tr><th>Name</th><th>Description</th></tr></thead><tbody>")
 
-        For Each p As param In items
-            sb.AppendLine($"<tr><td class=""pname""><code>{DocHtml.Escape(p.name)}</code></td><td class=""pdesc"">{md.ToHtml(p.text)}</td></tr>")
+        If hasTypes Then
+            sb.AppendLine("<div class=""tablewrap""><table class=""param-table""><thead><tr><th>Name</th><th>Type</th><th>Description</th></tr></thead><tbody>")
+        Else
+            sb.AppendLine("<div class=""tablewrap""><table class=""param-table""><thead><tr><th>Name</th><th>Description</th></tr></thead><tbody>")
+        End If
+
+        For i As Integer = 0 To items.Length - 1
+            Dim p As param = items(i)
+            Dim typeCell$ = ""
+
+            If hasTypes Then
+                Dim typeRef$ = If(i < typeRefs.Length, typeRefs(i), "")
+                Dim cell$ = If(typeRef.Length > 0, ctx.RenderTypeReference(typeRef, pageUrl), "")
+
+                typeCell = $"<td class=""ptype"">{cell}</td>"
+            End If
+
+            sb.AppendLine($"<tr><td class=""pname""><code>{DocHtml.Escape(p.name)}</code></td>{typeCell}<td class=""pdesc"">{md.ToHtml(p.text)}</td></tr>")
         Next
 
         sb.AppendLine("</tbody></table></div>")

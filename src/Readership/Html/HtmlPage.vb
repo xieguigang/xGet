@@ -81,21 +81,7 @@ Public Module DocHtml
     ''' <param name="name"></param>
     ''' <returns></returns>
     Public Function DisplayTypeName(name As String) As String
-        If String.IsNullOrEmpty(name) Then
-            Return ""
-        End If
-
-        Dim p = name.IndexOf("`"c)
-
-        If p > 0 Then
-            name = name.Substring(0, p)
-        End If
-
-        If name.Contains("#") Then
-            name = name.Replace("#", ".")
-        End If
-
-        Return name
+        Return ApiDocSite.ShortTypeName(name)
     End Function
 End Module
 
@@ -195,6 +181,66 @@ Public Class DocSiteContext
     End Function
 
     ''' <summary>
+    ''' render a doc id type reference as a link to its type page, or as a plain
+    ''' code text when the type is not a part of the current document site.
+    ''' </summary>
+    ''' <param name="typeReference"></param>
+    ''' <param name="pageUrl"></param>
+    ''' <returns></returns>
+    Public Function RenderTypeReference(typeReference As String, pageUrl As String) As String
+        Dim text$ = ApiDocSite.DisplayTypeReference(typeReference)
+
+        If text.Length = 0 Then
+            Return ""
+        End If
+
+        Dim title$ = DocHtml.Attr(typeReference)
+        Dim url$ = Site.ResolveUrl(ApiDocSite.TypeCref(typeReference))
+
+        If String.IsNullOrEmpty(url) Then
+            Return $"<code class=""sig-type"" title=""{title}"">{DocHtml.Escape(text)}</code>"
+        End If
+
+        Return $"<a class=""cref"" href=""{DocHtml.Attr(BaseUrl(pageUrl) & url)}"" title=""{title}"">{DocHtml.Escape(text)}</a>"
+    End Function
+
+    ''' <summary>
+    ''' render the member signature with the linked parameter types, for example
+    ''' ``op_Inequality(Set, Set)`` where the ``Set`` types are links to their
+    ''' type pages.
+    ''' </summary>
+    ''' <param name="typeEntry"></param>
+    ''' <param name="member"></param>
+    ''' <param name="pageUrl"></param>
+    ''' <returns></returns>
+    Public Function MemberSignature(typeEntry As DocTypeEntry, member As DocMemberEntry, pageUrl As String) As String
+        Dim signature$ = member.Signature(typeEntry)
+        Dim types$() = ApiDocSite.ParseParameterTypes(signature)
+        Dim openIndex As Integer = signature.IndexOf("("c)
+
+        If types.Length = 0 OrElse openIndex <= 0 Then
+            Return $"<span class=""ws-pre"">{DocHtml.Escape(signature)}</span>"
+        End If
+
+        Dim sb As New StringBuilder
+
+        sb.Append(DocHtml.Escape(signature.Substring(0, openIndex)))
+        sb.Append("(")
+
+        For i As Integer = 0 To types.Length - 1
+            If i > 0 Then
+                sb.Append(", ")
+            End If
+
+            sb.Append(RenderTypeReference(types(i), pageUrl))
+        Next
+
+        sb.Append(")")
+
+        Return sb.ToString
+    End Function
+
+    ''' <summary>
     ''' render the whole html page with the shared header, sidebar tree and footer
     ''' </summary>
     ''' <param name="pageUrl">the site relative url of the current page</param>
@@ -217,6 +263,9 @@ Public Class DocSiteContext
             sb.AppendLine($"<link rel=""stylesheet"" href=""{base}{css}"" />")
         Next
 
+        ' restore the sidebar collapse state before the body is rendered, so that
+        ' the page will not flicker between the expanded and the collapsed state.
+        sb.AppendLine("<script>try{if(localStorage.getItem('readership.sidebar')==='collapsed'){document.documentElement.classList.add('side-collapsed');}}catch(e){}</script>")
         sb.AppendLine("</head>")
         sb.AppendLine("<body data-page=""doc"">")
         sb.AppendLine("<a id=""top""></a>")
@@ -233,7 +282,10 @@ Public Class DocSiteContext
         sb.AppendLine($"<a href=""{base}index.html#namespaces"">Namespaces</a>")
         sb.AppendLine($"<a href=""{base}index.html#assemblies"">Assemblies</a>")
         sb.AppendLine("</nav>")
+        sb.AppendLine("<div class=""topbar-tools"">")
+        sb.AppendLine("<button id=""doc-side-toggle"" class=""home-btn doc-toggle"" type=""button"" title=""Hide navigation"" aria-label=""Hide navigation"" aria-controls=""doc-tree"" aria-expanded=""true"">◧</button>")
         sb.AppendLine("<a class=""home-btn"" href=""#top"" title=""Top"" aria-label=""Top"">↑</a>")
+        sb.AppendLine("</div>")
         sb.AppendLine("</header>")
 
         ' --- body shell ---

@@ -173,17 +173,38 @@
             apply();
         }
 
-        /* ---- keep the active tree node visible ---- */
+        /* ---- sidebar collapse (the state is remembered in the localStorage) ---- */
 
-        var side = document.querySelector('.doc-side');
+        var SIDE_KEY = 'readership.sidebar';
+        var toggle = document.getElementById('doc-side-toggle');
 
-        if (side) {
-            var activeNode = document.querySelector('.doc-ns.active > summary') ||
-                document.querySelector('.doc-types a.on');
-
-            if (activeNode && activeNode.offsetTop > side.clientHeight) {
-                side.scrollTop = activeNode.offsetTop - side.clientHeight / 2;
+        function syncToggle(collapsed) {
+            if (!toggle) {
+                return;
             }
+
+            var label = collapsed ? 'Show navigation' : 'Hide navigation';
+
+            toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            toggle.setAttribute('aria-label', label);
+            toggle.title = label;
+        }
+
+        syncToggle(document.documentElement.classList.contains('side-collapsed'));
+
+        if (toggle) {
+            toggle.addEventListener('click', function () {
+                var collapsed = !document.documentElement.classList.contains('side-collapsed');
+
+                document.documentElement.classList.toggle('side-collapsed', collapsed);
+                syncToggle(collapsed);
+
+                try {
+                    localStorage.setItem(SIDE_KEY, collapsed ? 'collapsed' : 'expanded');
+                } catch (e) {
+                    /* the localStorage could be disabled by the browser settings */
+                }
+            });
         }
 
         /* ---- smooth jump for the in page anchors ---- */
