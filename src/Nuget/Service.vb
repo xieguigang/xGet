@@ -10,6 +10,7 @@ Imports Flute.Http.Core.HttpStream
 Imports Flute.Http.Core.Message
 Imports Flute.Http.Core.Message.HttpHeader
 Imports Microsoft.VisualBasic.Net.Http
+Imports Microsoft.VisualBasic.Net.Protocols.ContentTypes
 
 ''' <summary>
 ''' the experimental nuget server controller.
@@ -42,6 +43,13 @@ Public Class Service
     ''' </summary>
     Private checkpointTimer As System.Threading.Timer
 
+    ''' <summary>
+    ''' the schedule which regenerates the site map when the api document
+    ''' database changed and the server is idle. it is kept in a field because
+    ''' the response helpers report the request activity to it.
+    ''' </summary>
+    Private sitemap As SitemapScheduler
+
     Public Sub Mount(router As HttpRouter, config As IReadOnlyDictionary(Of String, String)) Implements IHttpAppModule.Mount
         Me.router = router
         Me.config = NugetConfiguration.FromConfig(config)
@@ -49,11 +57,14 @@ Public Class Service
         Call Directory.CreateDirectory(Me.config.DataDirectory)
         Call Directory.CreateDirectory(Me.config.PackageDirectory)
         Call Directory.CreateDirectory(Me.config.DatabaseDirectory)
+        Call Directory.CreateDirectory(Me.config.TempDirectory)
 
         Me.store = New NugetStore(Me.config.DatabaseDirectory, Me.config.CreateStorageOptions())
         Me.auth = New TotpAuth(Me.store)
 
         Call $"nuget server data directory: {Me.config.DataDirectory}".info()
+
+        Call registerStyleSheetMime()
 
         If Me.config.ClusterEnabled Then
             ' the first run is delayed so that it does not compete with the
@@ -79,6 +90,36 @@ Public Class Service
             period:=TimeSpan.FromSeconds(Me.config.DbCheckpointSeconds))
 
         Call $"database checkpoint scheduled: every {Me.config.DbCheckpointSeconds} second(s), idle merge after {Me.config.DbMergeIdleSeconds}s".info()
+
+        ' the site map schedule: it rebuilds the sitemap.xml inside the scratch
+        ' directory when the api document database changed and no controller
+        ' request was served for a while. it is assigned to the field before it
+        ' is started so that a request which arrives during the startup could
+        ' already report its activity.
+        Me.sitemap = New SitemapScheduler(Me.config, Me.store)
+        Call Me.sitemap.Start()
+    End Sub
+
+    ''' <summary>
+    ''' teach the static file system the ``.xsl`` extension so that the sitemap
+    ''' style sheet is served as xml; without it the browser would refuse to
+    ''' apply a style sheet delivered as ``application/octet-stream``. the mime
+    ''' table is a process wide cache, the patch is therefore idempotent, and a
+    ''' failure is only a warning because the site map itself still works.
+    ''' </summary>
+    Private Shared Sub registerStyleSheetMime()
+        Try
+            Dim table As Dictionary(Of String, ContentType) = TryCast(MIME.SuffixTable, Dictionary(Of String, ContentType))
+
+            If table Is Nothing Then
+                Call "the mime table is read only, the .xsl style sheet may be served as a binary stream".warning()
+                Return
+            End If
+
+            table(".xsl") = New ContentType("XSLT stylesheet", "application/xml", ".xsl")
+        Catch ex As Exception
+            Call $"the .xsl mime type could not be registered: {ex.Message}".warning()
+        End Try
     End Sub
 
     ''' <summary>
@@ -823,6 +864,8 @@ Public Class Service
     ''' markdown) so that the detail page can render it.
     ''' </summary>
     Private Sub writeReadme(res As HttpResponse, id As String, version As String)
+        Call SitemapScheduler.TouchRequest()
+
         Dim versions As List(Of PackageRecord) = store.GetVersions(id)
 
         If versions.Count = 0 Then
@@ -866,6 +909,8 @@ Public Class Service
 
     <HttpGet("/api/icon/{id}")>
     Public Sub ApiPackageIcon(req As HttpRequest, res As HttpResponse)
+        Call SitemapScheduler.TouchRequest()
+
         Dim id As String = routeValue(req, "id")
         Dim metadata As Dictionary(Of String, String) = store.GetPackageMetadata(id)
         Dim iconFile As String = ""
@@ -1173,6 +1218,33 @@ Public Class Service
 #Region "api document pages (server side rendered, pseudo static)"
 
     ''' <summary>
+    ''' the pseudo static route of the site map: it answers the ``sitemap.xml``
+    ''' which was generated in the scratch directory. when the file is missing
+    ''' (the server was never idle long enough, or the scratch folder was
+    ''' cleared) it is generated on the fly, so that a crawler never sees a 404.
+    ''' 
+    ''' the reference to the style sheet is served by the static file system.
+    ''' </summary>
+    <HttpGet("/sitemap.xml")>
+    Public Sub SitemapXml(req As HttpRequest, res As HttpResponse)
+        Call SitemapScheduler.TouchRequest()
+
+        Dim xml As String = If(sitemap IsNot Nothing, sitemap.TryReadXml(), Nothing)
+
+        If String.IsNullOrEmpty(xml) Then
+            res.WriteError(HTTP_RFC.RFC_NOT_FOUND,
+                "the sitemap is not available yet; it is generated when the document database changes and the server is idle")
+            Return
+        End If
+
+        Dim bytes As Byte() = Encoding.UTF8.GetBytes(xml)
+
+        res.AccessControlAllowOrigin = "*"
+        res.WriteHeader("application/xml; charset=utf-8", bytes.Length)
+        Call res.SendData(bytes)
+    End Sub
+
+    ''' <summary>
     ''' the global cross package api document index page.
     ''' </summary>
     <HttpGet("/docs")>
@@ -1239,6 +1311,8 @@ Public Class Service
     ''' <param name="res"></param>
     ''' <param name="html"></param>
     Private Shared Sub writeHtml(res As HttpResponse, html As String)
+        Call SitemapScheduler.TouchRequest()
+
         Dim bytes As Byte() = Encoding.UTF8.GetBytes(html)
 
         res.WriteHeader("text/html; charset=utf-8", bytes.Length)
@@ -1351,6 +1425,14 @@ Public Class Service
     ''' </summary>
     ''' <param name="pkg">the published package version.</param>
     Private Sub indexApiDocs(pkg As PackageRecord)
+        ' the package itself was already added to the feed, so the site map is
+        ' stale from this point on, even when the document extraction fails
+        ' below. a racing generation is harmless: the fingerprint of the
+        ' database is compared as well, so the next idle window rebuilds it.
+        If sitemap IsNot Nothing Then
+            Call sitemap.NotifyDocsChanged()
+        End If
+
         Try
             Dim warnings As New List(Of String)
             Dim records As List(Of PackageApiDocRecord) = PackageApiDocs.Extract(
@@ -1509,6 +1591,11 @@ Public Class Service
     ''' any additional serialization.
     ''' </summary>
     Private Shared Sub writeRawJson(res As HttpResponse, json As String)
+        ' report the request activity to the site map schedule; the router of
+        ' the host has no request middleware which a module could hook, so the
+        ' response helpers of this controller feed the idle clock.
+        Call SitemapScheduler.TouchRequest()
+
         Dim bytes As Byte() = Encoding.UTF8.GetBytes(json)
 
         res.WriteHeader("application/json", bytes.Length)

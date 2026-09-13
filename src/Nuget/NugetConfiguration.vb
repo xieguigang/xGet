@@ -51,6 +51,44 @@ Public Class NugetConfiguration
     Public ReadOnly Property BaseUrl As String
 
     ''' <summary>
+    ''' the scratch directory of the server: the generated ``sitemap.xml`` is
+    ''' written into it and then served through the ``/sitemap.xml`` route.
+    ''' configuration key ``tmp``, default is the ``tmp`` folder next to the
+    ''' ``wwwroot`` folder.
+    ''' </summary>
+    Public ReadOnly Property TempDirectory As String
+
+    ''' <summary>
+    ''' whether the periodic sitemap generation is enabled. configuration key
+    ''' ``sitemap-enabled``, default True.
+    ''' </summary>
+    Public ReadOnly Property SitemapEnabled As Boolean
+
+    ''' <summary>
+    ''' an optional public base url used by the sitemap links only. it is
+    ''' required because the sitemap is built in the background where no http
+    ''' request is available to infer the host. configuration key
+    ''' ``sitemap-base-url``; when it is empty the ``base-url`` value is used
+    ''' instead, and when both are empty the generation is skipped with a
+    ''' warning.
+    ''' </summary>
+    Public ReadOnly Property SitemapBaseUrl As String
+
+    ''' <summary>
+    ''' the server has to stay without any controller request for at least this
+    ''' many seconds before the sitemap is regenerated. configuration key
+    ''' ``sitemap-idle-seconds``, default 60.
+    ''' </summary>
+    Public ReadOnly Property SitemapIdleSeconds As Integer
+
+    ''' <summary>
+    ''' the interval in seconds of the sitemap schedule which tests whether the
+    ''' document database has changed and the server is idle. configuration key
+    ''' ``sitemap-interval-seconds``, default 300.
+    ''' </summary>
+    Public ReadOnly Property SitemapIntervalSeconds As Integer
+
+    ''' <summary>
     ''' whether the periodic package clustering analysis (tag matrix -> umap ->
     ''' kmeans) is enabled. configuration key ``cluster-enabled``.
     ''' </summary>
@@ -110,7 +148,12 @@ Public Class NugetConfiguration
     Public Const DefaultDbMergeOperations As Integer = 2000
     Public Const DefaultDbCheckpointSeconds As Integer = 300
 
+    Public Const DefaultSitemapIdleSeconds As Integer = 60
+    Public Const DefaultSitemapIntervalSeconds As Integer = 300
+
     Private Sub New(data As String, packages As String, database As String, wwwroot As String, template As String, baseUrl As String,
+                    tmp As String, sitemapEnabled As Boolean, sitemapBaseUrl As String,
+                    sitemapIdleSeconds As Integer, sitemapIntervalSeconds As Integer,
                     clusterEnabled As Boolean, clusterK As Integer, clusterIntervalMinutes As Integer,
                     clusterMinSamples As Integer, clusterNeighbors As Integer,
                     dbMergeIdleSeconds As Integer, dbMergeOperations As Integer, dbCheckpointSeconds As Integer)
@@ -121,6 +164,11 @@ Public Class NugetConfiguration
         Me.Wwwroot = wwwroot
         Me.TemplateDirectory = template
         Me.BaseUrl = baseUrl
+        Me.TempDirectory = tmp
+        Me.SitemapEnabled = sitemapEnabled
+        Me.SitemapBaseUrl = sitemapBaseUrl
+        Me.SitemapIdleSeconds = sitemapIdleSeconds
+        Me.SitemapIntervalSeconds = sitemapIntervalSeconds
         Me.ClusterEnabled = clusterEnabled
         Me.ClusterK = clusterK
         Me.ClusterIntervalMinutes = clusterIntervalMinutes
@@ -130,6 +178,23 @@ Public Class NugetConfiguration
         Me.DbMergeOperations = dbMergeOperations
         Me.DbCheckpointSeconds = dbCheckpointSeconds
     End Sub
+
+    ''' <summary>
+    ''' the effective public base url of the sitemap links: the dedicated
+    ''' ``sitemap-base-url`` wins, then the generic ``base-url``, and an empty
+    ''' string means that the sitemap can not be generated because no public
+    ''' host is known.
+    ''' </summary>
+    ''' <returns>the base url without a trailing slash, or an empty string.</returns>
+    Public Function ResolveSitemapBaseUrl() As String
+        Dim url As String = If(String.IsNullOrWhiteSpace(SitemapBaseUrl), BaseUrl, SitemapBaseUrl)
+
+        If String.IsNullOrWhiteSpace(url) Then
+            Return ""
+        End If
+
+        Return url.Trim().TrimEnd("/"c)
+    End Function
 
     ''' <summary>
     ''' build the JSql storage options of this server instance, so that the
@@ -147,7 +212,9 @@ Public Class NugetConfiguration
 
     ''' <summary>
     ''' build the configuration from the host supplied configuration dictionary.
-    ''' accepted keys: ``data``, ``packages``, ``db``, ``wwwroot``, ``base-url``,
+    ''' accepted keys: ``data``, ``packages``, ``db``, ``wwwroot``, ``template``,
+    ''' ``base-url``, ``tmp``, ``sitemap-enabled``, ``sitemap-base-url``,
+    ''' ``sitemap-idle-seconds``, ``sitemap-interval-seconds``,
     ''' ``cluster-enabled``, ``cluster-k``, ``cluster-interval``,
     ''' ``cluster-min-samples`` and ``cluster-neighbors``.
     ''' </summary>
@@ -173,6 +240,7 @@ Public Class NugetConfiguration
         Dim wwwroot As String = getValue(config, "wwwroot")
         Dim baseUrl As String = getValue(config, "base-url")
         Dim template As String = getValue(config, "template")
+        Dim tmp As String = getValue(config, "tmp")
 
         If String.IsNullOrEmpty(template) Then
             If Not String.IsNullOrEmpty(wwwroot) Then
@@ -182,8 +250,20 @@ Public Class NugetConfiguration
             End If
         End If
 
+        If String.IsNullOrEmpty(tmp) Then
+            If Not String.IsNullOrEmpty(wwwroot) Then
+                tmp = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(wwwroot)), "tmp")
+            Else
+                tmp = Path.Combine(Directory.GetCurrentDirectory(), "tmp")
+            End If
+        End If
+
         Return New NugetConfiguration(
-            data, packages, database, wwwroot, template, baseUrl,
+            data, packages, database, wwwroot, template, baseUrl, tmp,
+            boolValue(config, "sitemap-enabled", True),
+            getValue(config, "sitemap-base-url"),
+            intValue(config, "sitemap-idle-seconds", DefaultSitemapIdleSeconds, 5, 86400),
+            intValue(config, "sitemap-interval-seconds", DefaultSitemapIntervalSeconds, 30, 86400),
             boolValue(config, "cluster-enabled", True),
             intValue(config, "cluster-k", DefaultClusterK, 2, 64),
             intValue(config, "cluster-interval", DefaultClusterIntervalMinutes, 1, 1440),
