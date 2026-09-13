@@ -63,7 +63,7 @@ Public Class DocMemberEntry
     ''' the full declare information, example as ``Ns.Type.Method(System.String)``
     ''' </summary>
     ''' <returns></returns>
-    Public Property Declare As String
+    Public Property DeclareText As String
 
     ''' <summary>
     ''' the html anchor of this member inside its type page
@@ -105,15 +105,15 @@ Public Class DocMemberEntry
     ''' </summary>
     ''' <returns></returns>
     Public Function Signature(typeEntry As DocTypeEntry) As String
-        Dim name$ = If(Declare, Name)
+        Dim decl$ = If(DeclareText, Name)
 
         If typeEntry IsNot Nothing AndAlso Not String.IsNullOrEmpty(typeEntry.FullName) Then
-            If name.StartsWith(typeEntry.FullName & ".", StringComparison.Ordinal) Then
-                Return name.Substring(typeEntry.FullName.Length + 1)
+            If decl.StartsWith(typeEntry.FullName & ".", StringComparison.Ordinal) Then
+                Return decl.Substring(typeEntry.FullName.Length + 1)
             End If
         End If
 
-        Return name
+        Return decl
     End Function
 End Class
 
@@ -284,7 +284,7 @@ Public Class ApiDocSite
         End If
 
         Dim id$ = cref.Trim()
-        Dim url$
+        Dim url As String = Nothing
 
         If Xref.TryGetValue(id, url) Then
             Return url
@@ -359,7 +359,7 @@ Public Class ApiDocSite
 
             For Each m As DocMemberEntry In t.Members
                 Dim target$ = t.Url & "#" & m.Anchor
-                Dim decl$ = If(m.Declare, m.Name)
+                Dim decl$ = If(m.DeclareText, m.Name)
                 Dim noParams$ = StripParams(decl)
 
                 Call addXref(m.Kind & ":" & decl, target)
@@ -411,17 +411,17 @@ Public Class ApiDocSite
             .GroupBy(Function(m) If(m.Name, "")) _
             .OrderBy(Function(x) x.Key)
 
-            Dim overloads = g.OrderBy(Function(m) If(m.Declare, "")).ToList
+            Dim overloadList = g.OrderBy(Function(m) If(m.[Declare], "")).ToList
 
-            For i As Integer = 1 To overloads.Count
-                Dim m As ProjectMember = overloads(i - 1)
+            For i As Integer = 1 To overloadList.Count
+                Dim m As ProjectMember = overloadList(i - 1)
                 Dim anchor$ = "member-" & Char.ToLowerInvariant(kind) & "-" & Slug(g.Key) &
                     If(i = 1, "", "-" & i.ToString)
 
                 Call typeEntry.Members.Add(New DocMemberEntry With {
                     .Kind = kind,
                     .Name = g.Key,
-                    .Declare = If(m.Declare, g.Key),
+                    .DeclareText = If(m.[Declare], g.Key),
                     .Anchor = anchor,
                     .OverloadIndex = i - 1,
                     .Source = m
@@ -431,13 +431,13 @@ Public Class ApiDocSite
     End Sub
 
     Private Shared Function PageUrl(folder As String, key As String, used As HashSet(Of String)) As String
-        Dim slug$ = Slug(key)
-        Dim unique$ = slug
+        Dim baseName$ = Slug(key)
+        Dim unique$ = baseName
         Dim n As Integer = 1
 
         While used.Contains(unique)
             n += 1
-            unique = slug & "-" & n.ToString
+            unique = baseName & "-" & n.ToString
         End While
 
         Call used.Add(unique)

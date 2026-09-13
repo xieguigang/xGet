@@ -63,7 +63,7 @@ Public Class IndexPageWriter
             .GroupBy(Function(t) t.Project) _
             .OrderBy(Function(x) x.Key)
 
-            Dim nsCount As Integer = site.Namespaces.Count(Function(n) String.Equals(n.Project, g.Key, StringComparison.Ordinal))
+            Dim nsCount As Integer = site.Namespaces.Where(Function(n) String.Equals(n.Project, g.Key, StringComparison.Ordinal)).Count()
             Dim memberCount As Integer = g.Sum(Function(t) t.Members.Count)
 
             sb.AppendLine($"<tr><td><span class=""pkg-name"">{DocHtml.Escape(g.Key)}</span></td><td class=""num"">{nsCount}</td><td class=""num"">{g.Count}</td><td class=""num"">{memberCount}</td></tr>")

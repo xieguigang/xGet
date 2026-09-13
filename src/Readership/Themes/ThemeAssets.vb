@@ -97,15 +97,15 @@ Public Module ThemeAssets
             .Name = Path.GetFileName(root)
         }
 
-        For Each file As String In Directory.GetFiles(root, "*", SearchOption.AllDirectories)
-            Dim rel$ = file.Substring(root.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+        For Each filePath As String In Directory.GetFiles(root, "*", SearchOption.AllDirectories)
+            Dim rel$ = filePath.Substring(root.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
             Dim target$ = Path.Combine(output, "assets", rel)
             Dim siteUrl$ = "assets/" & rel.Replace(Path.DirectorySeparatorChar, "/"c).Replace(Path.AltDirectorySeparatorChar, "/"c)
 
             Call ensureParent(target)
-            Call File.Copy(file, target, True)
+            Call File.Copy(filePath, target, True)
 
-            Select Case Path.GetExtension(file).ToLowerInvariant
+            Select Case Path.GetExtension(filePath).ToLowerInvariant
                 Case ".css"
                     Call bundle.Css.Add(siteUrl)
                 Case ".js"
@@ -148,8 +148,8 @@ Public Module ThemeAssets
         End Using
     End Sub
 
-    Private Sub ensureParent(path As String)
-        Dim dir$ = Path.GetDirectoryName(path)
+    Private Sub ensureParent(targetPath As String)
+        Dim dir$ = Path.GetDirectoryName(targetPath)
 
         If Not String.IsNullOrEmpty(dir) Then
             Call Directory.CreateDirectory(dir)

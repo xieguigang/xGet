@@ -8,19 +8,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\GCModeller\src\runtime\Darwinism\src\data\LINQ\LINQ\LINQ.vbproj" />
     <ProjectReference Include="..\..\GCModeller\src\runtime\httpd\src\Flute\Flute.NET5.vbproj" />
     <ProjectReference Include="..\..\GCModeller\src\runtime\httpd\src\HTTP_SERVER\Fluteway.vbproj" />
-    <ProjectReference Include="..\..\GCModeller\src\runtime\sciBASIC#\Data\DataFrame\dataframework-netcore5.vbproj" />
-    <ProjectReference Include="..\..\GCModeller\src\runtime\sciBASIC#\Data_science\DataMining\DataMining\DataMining.NET5.vbproj" />
-    <ProjectReference Include="..\..\GCModeller\src\runtime\sciBASIC#\Data_science\DataMining\UMAP\UMAP.NET5.vbproj" />
-    <ProjectReference Include="..\..\GCModeller\src\runtime\sciBASIC#\Data_science\Graph\graph-netcore5.vbproj" />
-    <ProjectReference Include="..\..\GCModeller\src\runtime\sciBASIC#\Data_science\Mathematica\Math\Math\Math.NET5.vbproj" />
-    <ProjectReference Include="..\..\GCModeller\src\runtime\sciBASIC#\Data_science\Mathematica\Math\Randomizer\randomizer-netcore5.vbproj" />
     <ProjectReference Include="..\..\GCModeller\src\runtime\sciBASIC#\Microsoft.VisualBasic.Core\src\Core.vbproj" />
-    <ProjectReference Include="..\..\GCModeller\src\runtime\sciBASIC#\mime\application%json\JSON-netcore5.vbproj" />
-    <ProjectReference Include="..\..\GCModeller\src\runtime\sciBASIC#\mime\text%markdown\markdown.NET5.vbproj" />
-    <ProjectReference Include="..\..\JSql\src\JSql\JSql.vbproj" />
     <ProjectReference Include="..\src\Nuget\Nuget.vbproj" />
     <ProjectReference Include="..\src\Readership\Readership.vbproj" />
     <ProjectReference Include="..\src\xGet\xGet.vbproj" />

@@ -3,7 +3,15 @@
   <PropertyGroup>
     <RootNamespace>Readership</RootNamespace>
     <TargetFramework>net10.0</TargetFramework>
+    <GenerateDocumentationFile>True</GenerateDocumentationFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Themes\scibasic.css" LogicalName="Readership.Themes.scibasic.css" />
+    <EmbeddedResource Include="Themes\docs.css" LogicalName="Readership.Themes.docs.css" />
+    <EmbeddedResource Include="Themes\docs.js" LogicalName="Readership.Themes.docs.js" />
+    <EmbeddedResource Include="Themes\favicon.png" LogicalName="Readership.Themes.favicon.png" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\GCModeller\src\runtime\sciBASIC#\Data_science\Graph\graph-netcore5.vbproj" />

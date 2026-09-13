@@ -41,7 +41,7 @@ Public Class CommentMarkdown
             Return ""
         End If
 
-        Dim html As String
+        Dim html As String = Nothing
 
         If cache.TryGetValue(text, html) Then
             Return html

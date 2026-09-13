@@ -1,0 +1,494 @@
+/* =====================================================================
+   docs.css — api reference document layout
+   it is used together with the project base theme (scibasic.css) and it
+   only defines the document specific layout components, the color tokens
+   are inherited from the base theme.
+   ===================================================================== */
+
+.doc-shell {
+    display: grid;
+    grid-template-columns: 300px minmax(0, 1fr);
+    align-items: start;
+    max-width: 1360px;
+    margin: 0 auto;
+    padding: 0 3.4vw;
+}
+
+.doc-side {
+    position: sticky;
+    top: 79px;
+    max-height: calc(100vh - 79px);
+    overflow-y: auto;
+    padding: 24px 20px 40px 0;
+    border-right: 1px solid var(--hairline2);
+}
+
+.doc-side-head {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding-bottom: 10px;
+    background: var(--bg);
+}
+
+.doc-filter {
+    width: 100%;
+    padding: 9px 12px;
+    background: var(--panel);
+    border: 1px solid var(--hairline2);
+    border-radius: 2px;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 12.5px;
+    outline: none;
+    transition: border-color .25s var(--ease), background .25s var(--ease);
+}
+
+.doc-filter:focus {
+    border-color: var(--green);
+    background: var(--panel-2);
+}
+
+.doc-ns {
+    margin: 2px 0;
+}
+
+.doc-ns > summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    list-style: none;
+    cursor: pointer;
+    border-radius: 2px;
+}
+
+.doc-ns > summary::-webkit-details-marker {
+    display: none;
+}
+
+.doc-ns > summary::before {
+    content: "▸";
+    flex: none;
+    color: var(--ink-ghost);
+    font-size: 10px;
+    transition: transform .2s var(--ease);
+}
+
+.doc-ns[open] > summary::before {
+    transform: rotate(90deg);
+}
+
+.doc-ns > summary a {
+    color: var(--ink-dim);
+    font-size: 12.5px;
+    word-break: break-all;
+}
+
+.doc-ns > summary a:hover,
+.doc-ns > summary a.on {
+    color: var(--green);
+}
+
+.doc-ns > summary .count {
+    flex: none;
+    margin-left: auto;
+    color: var(--ink-ghost);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+}
+
+.doc-types {
+    margin: 0 0 4px;
+    padding: 0 0 0 18px;
+    list-style: none;
+    border-left: 1px solid var(--hairline2);
+}
+
+.doc-types li {
+    margin: 1px 0;
+}
+
+.doc-types a {
+    display: block;
+    padding: 4px 8px;
+    color: var(--ink-faint);
+    font-size: 12px;
+    word-break: break-all;
+    border-radius: 2px;
+    transition: color .2s var(--ease), background .2s var(--ease);
+}
+
+.doc-types a:hover {
+    color: var(--ink);
+    background: var(--panel-3);
+}
+
+.doc-types a.on {
+    margin-left: -19px;
+    padding-left: 17px;
+    color: var(--ink);
+    border-left: 2px solid var(--green);
+}
+
+.doc-main {
+    min-width: 0;
+}
+
+.doc-wrap {
+    width: auto;
+    margin: 0;
+    padding: 46px 0 30px;
+}
+
+/* ---- breadcrumbs ---- */
+
+.eyebrow a {
+    color: var(--ink-faint);
+}
+
+.eyebrow a:hover {
+    color: var(--green);
+}
+
+/* ---- namespace cards ---- */
+
+.ns-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 14px;
+}
+
+.ns-card {
+    display: block;
+    padding: 16px 18px;
+    border: 1px solid var(--hairline2);
+    border-radius: 2px;
+    background: var(--panel);
+    transition: border-color .25s var(--ease), transform .25s var(--ease), background .25s var(--ease);
+}
+
+.ns-card:hover {
+    border-color: var(--green);
+    transform: translateY(-2px);
+    background: var(--panel-2);
+}
+
+.ns-name {
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 13px;
+    word-break: break-all;
+}
+
+.ns-meta {
+    margin-top: 6px;
+    color: var(--ink-ghost);
+    font-size: 10.5px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+}
+
+.ns-sum {
+    margin-top: 8px;
+    color: var(--ink-faint);
+    font-size: 12.5px;
+    line-height: 1.7;
+}
+
+/* ---- type & member links ---- */
+
+a.type-link,
+a.member-link {
+    color: var(--ink);
+    border-bottom: 1px solid var(--hairline);
+    transition: color .25s var(--ease), border-color .25s var(--ease);
+}
+
+a.type-link:hover,
+a.member-link:hover {
+    color: var(--green);
+    border-color: var(--green);
+}
+
+/* ---- signatures ---- */
+
+.sig {
+    margin: 12px 0 18px;
+    padding: 12px 16px;
+    border: 1px solid var(--hairline2);
+    border-left: 2px solid var(--green);
+    border-radius: 2px;
+    background: var(--panel);
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.6;
+    overflow-x: auto;
+}
+
+.ws-pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* ---- member blocks ---- */
+
+section.member {
+    position: relative;
+    margin: 26px 0;
+    padding: 18px 20px;
+    border: 1px solid var(--hairline2);
+    border-radius: 2px;
+    background: var(--panel);
+    scroll-margin-top: 96px;
+    transition: border-color .25s var(--ease);
+}
+
+section.member:hover {
+    border-color: var(--hairline);
+}
+
+section.member:target {
+    border-color: var(--green);
+}
+
+.member-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.member-name {
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 14px;
+    font-weight: 600;
+    word-break: break-all;
+}
+
+.member-head .overload {
+    color: var(--ink-ghost);
+    font-size: 10.5px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+}
+
+.member-head .anchor {
+    margin-left: auto;
+    color: var(--ink-ghost);
+    opacity: 0;
+    transition: opacity .2s var(--ease), color .2s var(--ease);
+}
+
+section.member:hover .anchor {
+    opacity: 1;
+}
+
+.member-head .anchor:hover {
+    color: var(--green);
+}
+
+.badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border: 1px solid var(--hairline2);
+    border-radius: 2px;
+    color: var(--ink-dim);
+    font-size: 9.5px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+}
+
+.badge.method {
+    border-color: rgba(63, 174, 74, .5);
+    color: var(--green);
+}
+
+.badge.property {
+    border-color: rgba(111, 168, 220, .5);
+    color: var(--blue);
+}
+
+.badge.field {
+    border-color: rgba(224, 194, 74, .5);
+    color: var(--gold);
+}
+
+.badge.event {
+    border-color: rgba(255, 122, 110, .5);
+    color: var(--warn);
+}
+
+/* ---- markdown output ---- */
+
+.member-body,
+.article-body {
+    color: var(--ink-dim);
+    font-size: 14px;
+    line-height: 1.9;
+    word-break: break-word;
+}
+
+.member-body > *:first-child,
+.article-body > *:first-child {
+    margin-top: 0;
+}
+
+.member-body p,
+.article-body p {
+    margin: 0 0 12px;
+}
+
+.member-body a,
+.article-body a {
+    color: var(--ink);
+    border-bottom: 1px solid var(--hairline);
+    transition: color .25s var(--ease), border-color .25s var(--ease);
+}
+
+.member-body a:hover,
+.article-body a:hover {
+    color: var(--green);
+    border-color: var(--green);
+}
+
+.member-body code,
+.article-body code {
+    padding: 2px 5px;
+    border: 1px solid var(--hairline2);
+    border-radius: 2px;
+    background: #101010;
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 12.5px;
+}
+
+.member-body pre,
+.article-body pre {
+    margin: 0 0 14px;
+    padding: 14px 16px;
+    border: 1px solid var(--hairline2);
+    border-radius: 2px;
+    background: var(--panel-2);
+    overflow-x: auto;
+}
+
+.member-body pre code,
+.article-body pre code {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--ink-dim);
+    font-size: 12px;
+    line-height: 1.7;
+}
+
+.member-body ul,
+.member-body ol,
+.article-body ul,
+.article-body ol {
+    margin: 0 0 14px;
+    padding-left: 24px;
+}
+
+.member-body blockquote,
+.article-body blockquote {
+    margin: 0 0 14px;
+    padding: 4px 0 4px 16px;
+    border-left: 2px solid var(--green);
+    color: var(--ink-faint);
+}
+
+.member-body table,
+.article-body table {
+    width: 100%;
+    margin: 0 0 14px;
+}
+
+/* ---- sub labels ---- */
+
+.sub-label {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 18px 0 8px;
+    color: var(--ink-ghost);
+    font-size: 10px;
+    letter-spacing: .24em;
+    text-transform: uppercase;
+}
+
+.sub-label::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--hairline2);
+}
+
+/* ---- parameter tables ---- */
+
+.param-table th:first-child,
+.param-table td.pname {
+    width: 240px;
+}
+
+.pname code {
+    padding: 2px 6px;
+    border: 1px solid var(--hairline2);
+    border-radius: 2px;
+    background: #101010;
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 12px;
+}
+
+.pdesc p:last-child,
+.member-body p:last-child {
+    margin-bottom: 0;
+}
+
+/* ---- cref links ---- */
+
+code.cref {
+    padding: 2px 5px;
+    border: 1px solid var(--hairline2);
+    border-radius: 2px;
+    background: #101010;
+    color: var(--ink-dim);
+    font-family: var(--mono);
+    font-size: 12.5px;
+}
+
+a.cref {
+    color: var(--ink);
+    border-bottom: 1px solid var(--hairline);
+}
+
+a.cref:hover {
+    color: var(--green);
+    border-color: var(--green);
+}
+
+/* ---- responsive ---- */
+
+@media (max-width: 1000px) {
+    .doc-shell {
+        display: block;
+        padding: 0 4vw;
+    }
+
+    .doc-side {
+        position: static;
+        max-height: 260px;
+        margin-bottom: 10px;
+        padding-right: 0;
+        border-right: 0;
+        border-bottom: 1px solid var(--hairline2);
+    }
+
+    .doc-wrap {
+        padding-top: 26px;
+    }
+}

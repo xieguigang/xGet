@@ -61,7 +61,7 @@ Public Module DocHtml
         s = s.Replace("`", "").Replace("**", "").Replace("__", "")
         s = s.Trim(" "c, "#"c, "*"c, "-"c, ">"c, "|"c, vbTab)
 
-        Dim p = s.IndexOf(". "c)
+        Dim p = s.IndexOf(". ", StringComparison.Ordinal)
 
         If p > 20 Then
             s = s.Substring(0, p + 1)
@@ -246,8 +246,8 @@ Public Class DocSiteContext
                 sb.AppendLine("<ul class=""doc-types"">")
 
                 For Each t As DocTypeEntry In ns.Types
-                    Dim on As String = If(String.Equals(t.Url, pageUrl, StringComparison.OrdinalIgnoreCase), " class=""on""", "")
-                    sb.AppendLine($"<li><a{on} href=""{base}{t.Url}"">{DocHtml.Escape(DocHtml.DisplayTypeName(t.Name))}</a></li>")
+                    Dim onAttr As String = If(String.Equals(t.Url, pageUrl, StringComparison.OrdinalIgnoreCase), " class=""on""", "")
+                    sb.AppendLine($"<li><a{onAttr} href=""{base}{t.Url}"">{DocHtml.Escape(DocHtml.DisplayTypeName(t.Name))}</a></li>")
                 Next
 
                 sb.AppendLine("</ul>")

@@ -8,9 +8,10 @@ Public Class NamespacePageWriter
 
     Public Shared Function Render(ctx As DocSiteContext, ns As DocNamespaceEntry) As String
         Dim md As CommentMarkdown = ctx.Markdown(ns.Url)
+        Dim base$ = ctx.BaseUrl(ns.Url)
         Dim sb As New StringBuilder
 
-        sb.AppendLine($"<p class=""eyebrow""><b>NS</b> <span><a href=""{ctx.BaseUrl(ns.Url)}index.html"">Overview</a> / namespace</span></p>")
+        sb.AppendLine($"<p class=""eyebrow""><b>NS</b> <span><a href=""{base}index.html"">Overview</a> / namespace</span></p>")
         sb.AppendLine($"<h1 class=""headline"">{DocHtml.Escape(DocSiteContext.DisplayNamespace(ns.Name))}</h1>")
 
         sb.AppendLine("<div class=""meta"">")
@@ -32,7 +33,7 @@ Public Class NamespacePageWriter
             Dim summary$ = DocHtml.PlainSummary(If(t.Source, Nothing)?.Summary)
 
             sb.AppendLine("<tr>")
-            sb.AppendLine($"<td class=""mono""><a class=""type-link"" href=""{t.Url}"">{DocHtml.Escape(DocHtml.DisplayTypeName(t.Name))}</a></td>")
+            sb.AppendLine($"<td class=""mono""><a class=""type-link"" href=""{base}{t.Url}"">{DocHtml.Escape(DocHtml.DisplayTypeName(t.Name))}</a></td>")
             sb.AppendLine($"<td>{DocHtml.Escape(summary)}</td>")
             sb.AppendLine($"<td class=""num"">{t.Members.Count}</td>")
             sb.AppendLine("</tr>")

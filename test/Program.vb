@@ -3,6 +3,17 @@ Imports Nuget
 
 Module Program
     Sub Main(args As String())
+        ' 子命令分派：阅读器 api 文档生成器的测试
+        If args IsNot Nothing AndAlso args.Length > 0 Then
+            Dim command As String = args(0).TrimStart("-"c, "/"c).ToLowerInvariant()
+
+            Select Case command
+                Case "apidoc"
+                    Environment.ExitCode = ApiDocTest.Run(args.Skip(1).ToArray)
+                    Return
+            End Select
+        End If
+
         ' 0. 自检：确认实现与 RFC 6238 官方测试向量一致
         Console.WriteLine("RFC 6238 自检: " & If(RunSelfTest(), "通过", "失败"))
         Console.WriteLine()
