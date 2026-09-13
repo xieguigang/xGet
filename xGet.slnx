@@ -41,6 +41,9 @@
     <Project Path="../GCModeller/src/runtime/sciBASIC#/Data_science/Mathematica/Math/Randomizer/randomizer-netcore5.vbproj">
       <Platform Solution="*|x64" Project="x64" />
     </Project>
+    <Project Path="../GCModeller/src/runtime/sciBASIC#/nlp/NLP/NLP.NET.vbproj">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
   </Folder>
   <Folder Name="/server/">
     <Project Path="../GCModeller/src/runtime/httpd/src/HTTP_SERVER/Fluteway.vbproj">

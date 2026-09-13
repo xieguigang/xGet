@@ -213,6 +213,29 @@ Public Class ApiDocSite
     ''' <returns></returns>
     Public ReadOnly Property NamespaceByName As New Dictionary(Of String, DocNamespaceEntry)(StringComparer.OrdinalIgnoreCase)
 
+    ''' <summary>
+    ''' the total type count of every namespace, the types of the descendant
+    ''' namespaces are included. it is keyed by the full namespace name.
+    ''' </summary>
+    ''' <returns></returns>
+    Public ReadOnly Property NamespaceTypeCount As New Dictionary(Of String, Integer)(StringComparer.OrdinalIgnoreCase)
+
+    ''' <summary>
+    ''' the total type count of the given namespace, including the types of the
+    ''' descendant namespaces.
+    ''' </summary>
+    ''' <param name="namespaceName"></param>
+    ''' <returns></returns>
+    Public Function TypeCountOf(namespaceName As String) As Integer
+        Dim total As Integer = 0
+
+        If NamespaceTypeCount.TryGetValue(If(namespaceName, ""), total) Then
+            Return total
+        End If
+
+        Return 0
+    End Function
+
     Public ReadOnly Property MemberCount As Integer
         Get
             Return Types.Sum(Function(t) t.Members.Count)
@@ -285,13 +308,12 @@ Public Class ApiDocSite
             Next
         Next
 
-        ' the namespace tree is built from the dot separated namespace names, the
-        ' '.' separator must be converted into the '/' path separator because the
-        ' FilePath.ParseTokens only splits the path by the '/' and '\' characters.
-        site.NamespaceTree = FileSystemTree.BuildTree(
+        Call site.countNamespaceTypes()
+
+        site.NamespaceTree = buildNamespaceTree(
             site.Namespaces _
                 .Where(Function(n) Not String.IsNullOrWhiteSpace(n.Name)) _
-                .Select(Function(n) n.Name.Replace("."c, "/"c)))
+                .Select(Function(n) n.Name))
 
         Call site.buildXref()
 
@@ -413,6 +435,43 @@ Public Class ApiDocSite
         End If
     End Sub
 
+    ''' <summary>
+    ''' accumulate the type count of every namespace, every ancestor namespace
+    ''' accumulates the type count of all of its descendant namespaces.
+    ''' </summary>
+    Private Sub countNamespaceTypes()
+        Dim globalCount As Integer = 0
+
+        For Each ns As DocNamespaceEntry In Namespaces
+            Dim count As Integer = ns.Types.Count
+
+            If String.IsNullOrWhiteSpace(ns.Name) Then
+                globalCount += count
+                Continue For
+            End If
+
+            Dim path$ = ""
+
+            For Each segment As String In ns.Name.Split("."c)
+                If segment.Length = 0 Then
+                    Continue For
+                End If
+
+                path = If(path.Length = 0, segment, path & "." & segment)
+
+                Dim total As Integer = 0
+
+                If NamespaceTypeCount.TryGetValue(path, total) Then
+                    NamespaceTypeCount(path) = total + count
+                Else
+                    NamespaceTypeCount(path) = count
+                End If
+            Next
+        Next
+
+        NamespaceTypeCount("") = globalCount
+    End Sub
+
     Private Shared Function namespaceSummary(ns As ProjectNamespace) As String
         Return ns.Types _
             .Where(Function(t) t IsNot Nothing AndAlso t.Name = APIExtensions.NamespaceDoc) _
@@ -459,6 +518,47 @@ Public Class ApiDocSite
             Next
         Next
     End Sub
+
+    ''' <summary>
+    ''' build the namespace tree from the dot separated namespace names. the tree
+    ''' node is created by the <see cref="FileSystemTree.AddFile"/> function, so
+    ''' every node of the tree is one namespace segment.
+    ''' 
+    ''' (the <see cref="FileSystemTree.BuildTree"/> function is not used here
+    ''' because it looks up the child node by the linq ``TryGetValue`` extension
+    ''' which writes a ``missing_index`` error log in the DEBUG build for every
+    ''' new segment.)
+    ''' </summary>
+    ''' <param name="names"></param>
+    ''' <returns></returns>
+    Private Shared Function buildNamespaceTree(names As IEnumerable(Of String)) As FileSystemTree
+        Dim root As New FileSystemTree With {
+            .Name = Nothing,
+            .Parent = Nothing,
+            .Files = New Dictionary(Of String, FileSystemTree)
+        }
+
+        For Each namespaceName As String In names
+            Dim node As FileSystemTree = root
+            Dim segments = namespaceName.Replace("."c, "/"c).Split("/"c)
+
+            For Each segment As String In segments
+                If segment.Length = 0 Then
+                    Continue For
+                End If
+
+                If node.Files.ContainsKey(segment) Then
+                    node = node.Files(segment)
+                Else
+                    node = node.AddFile(segment)
+                End If
+            Next
+
+            node.data = namespaceName
+        Next
+
+        Return root
+    End Function
 
     ''' <summary>
     ''' the folder path of a namespace. it is built from the namespace segments so

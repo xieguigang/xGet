@@ -198,10 +198,10 @@ Public Class DocSiteContext
     ''' render the whole html page with the shared header, sidebar tree and footer
     ''' </summary>
     ''' <param name="pageUrl">the site relative url of the current page</param>
-    ''' <param name="title"></param>
+    ''' <param name="pageTitle">the title of the current page</param>
     ''' <param name="content"></param>
     ''' <returns></returns>
-    Public Function Page(pageUrl As String, title As String, content As String) As String
+    Public Function Page(pageUrl As String, pageTitle As String, content As String) As String
         Dim base$ = BaseUrl(pageUrl)
         Dim sb As New StringBuilder
 
@@ -210,7 +210,7 @@ Public Class DocSiteContext
         sb.AppendLine("<head>")
         sb.AppendLine("<meta charset=""UTF-8"" />")
         sb.AppendLine("<meta name=""viewport"" content=""width=device-width, initial-scale=1.0"" />")
-        sb.AppendLine($"<title>{DocHtml.Escape(title)} · {DocHtml.Escape(Title)}</title>")
+        sb.AppendLine($"<title>{DocHtml.Escape(pageTitle)} · {DocHtml.Escape(Title)}</title>")
         sb.AppendLine($"<link rel=""icon"" type=""image/png"" href=""{base}favicon.png"" />")
 
         For Each css As String In Theme.Css
@@ -321,7 +321,7 @@ Public Class DocSiteContext
 
         sb.AppendLine("<div class=""doc-global"">")
         sb.AppendLine($"<a{onAttr} href=""{base}{entry.Url}"">(global)</a>")
-        sb.AppendLine($"<span class=""count"">{entry.Types.Count}</span>")
+        sb.AppendLine($"<span class=""count"">{Site.TypeCountOf("")}</span>")
         sb.AppendLine("</div>")
 
         Return sb.ToString
@@ -358,8 +358,12 @@ Public Class DocSiteContext
             sb.AppendLine($"<span class=""doc-node"" title=""{DocHtml.Attr(fullName)}"">{DocHtml.Escape(node.Name)}</span>")
         End If
 
-        If hasEntry AndAlso entry.Types.Count > 0 Then
-            sb.AppendLine($"<span class=""count"">{entry.Types.Count}</span>")
+        ' the count badge is the total type count of this namespace and all of its
+        ' descendant namespaces
+        Dim typeCount As Integer = Site.TypeCountOf(fullName)
+
+        If typeCount > 0 Then
+            sb.AppendLine($"<span class=""count"">{typeCount}</span>")
         End If
 
         sb.AppendLine("</summary>")

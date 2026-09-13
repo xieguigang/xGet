@@ -242,6 +242,12 @@
     color: var(--ink);
 }
 
+/* a full namespace name could be very long, let it wrap inside the content area */
+.doc-wrap .headline,
+.doc-wrap .meta {
+    overflow-wrap: anywhere;
+}
+
 /* ---- namespace cards ---- */
 
 .ns-grid {
