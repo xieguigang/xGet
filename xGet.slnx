@@ -10,10 +10,18 @@
     <Project Path="../GCModeller/src/runtime/httpd/src/Flute/Flute.NET5.vbproj">
       <Platform Solution="*|x64" Project="x64" />
     </Project>
+    <Project Path="../GCModeller/src/runtime/sciBASIC#/Microsoft.VisualBasic.Core/src/Core.vbproj">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
+  </Folder>
+  <Folder Name="/framework/doc/">
     <Project Path="../GCModeller/src/runtime/sciBASIC#/Data/DataFrame/dataframework-netcore5.vbproj">
       <Platform Solution="*|x64" Project="x64" />
     </Project>
-    <Project Path="../GCModeller/src/runtime/sciBASIC#/Microsoft.VisualBasic.Core/src/Core.vbproj">
+    <Project Path="../GCModeller/src/runtime/sciBASIC#/mime/application%json/JSON-netcore5.vbproj">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
+    <Project Path="../GCModeller/src/runtime/sciBASIC#/mime/text%markdown/markdown.NET5.vbproj">
       <Platform Solution="*|x64" Project="x64" />
     </Project>
   </Folder>
@@ -45,6 +53,7 @@
       <Platform Solution="*|x64" Project="x64" />
     </Project>
   </Folder>
+  <Project Path="src/Readership/Readership.vbproj" Id="b480d0c5-84ec-44f8-be0f-b3fb7640aa31" />
   <Project Path="src/xGet/xGet.vbproj" Id="b217e061-6101-4314-850b-29c931e01485">
     <Platform Solution="*|x64" Project="x64" />
   </Project>
