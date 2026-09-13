@@ -270,12 +270,19 @@ xGet batch    --server http://localhost:80 --email me@example.com --dir ./packag
 - 通过静态直链（`/packages/...`）下载不会计入每日下载量，页面与 NuGet 客户端均走控制器路径。
 - 上传认证为实验性 TOTP 方案，未实现用户管理、权限与审计等能力。
 
+---
+
 ## 11. API 文档生成（Readership）
 
 `src/Readership/Readership.vbproj` 是一个类库，把 .NET 程序集编译出的 XML 注释文档渲染为一套可离线浏览的静态 API 文档站点：
 
 - 输入：单个 `*.xml`、单个程序集（自动按同名 `.xml` 取注释文档），或一个包含多个 `*.xml` 的目录（合并为一个站点）。
-- 页面结构：首页索引 → 每个命名空间一页 → 每个类型一页；类型内的字段 / 属性 / 方法 / 事件以锚点定位，类型页包含签名、参数表、返回值与示例。
+- 页面结构：首页索引 → 每个命名空间一页 → 每个类型一页；类型内的字段 / 属性 / 方法 / 事件以锚点定位，类型页包含签名、参数表、返回值与示例；面包屑按命名空间段逐级链接。
+- 左侧导航：用 Core 的 `FileSystemTree`（`ApplicationServices/FileSystem/Fs/FileSystemTree.vb`）把命名空间构造成一棵树，页面左侧按树逐级展开，**节点只显示本段的名称**（如 `Microsoft` → `VisualBasic` → `ApplicationServices`），并显示该子树下的类型数量角标；当前页面所属命名空间的祖先链自动展开并高亮，当前命名空间下以短名列出其类型。
+- 页面宽度：内容区占视口宽度 **90%** 居中（侧栏 250px），超长的命名空间标题自动换行。
+- 文件布局：文档按命名空间层级写入多级子目录，不再全部平铺在同一个文件夹（避免大项目下单目录文件数过多）：
+  - 命名空间页：`namespaces/<seg1>/…/<segN>.html`（全局命名空间为 `namespaces/_global.html`）
+  - 类型页：`types/<seg1>/…/<segN>/<Type>.html`（全局命名空间为 `types/_global/<Type>.html`）
 - 注释渲染：`summary` / `remarks` / 参数 / 返回值 / 示例等文本统一经 `MarkdownRender`（`markdown.NET5.vbproj`）转换为 HTML。
 - 对象链接：`<see cref="..."/>` / `<seealso cref="..."/>` 由 Core 的 `TrimAssemblyDoc` 预处理为保留 cref 目标的 Markdown 链接，Readership 侧再解析为站点内实际的页面 / 锚点链接；站外目标降级为等宽文本。
 - 主题：内置默认 `scibasic` 暗色主题（与 `dist/wwwroot` 前端页面一致）；`Theme` 也可以指向一个外部主题目录，目录中的 `*.css` / `*.js` 会被发布到站点 `assets/` 并自动引用。
