@@ -268,3 +268,5 @@ pkg-trend.png
 pkg-readme.png
 about-trend.png
 /dist/tmp/e2e-data/db/nuget
+/dist/tmp/sitemap.xml
+/dist/tmp/sitemap.state

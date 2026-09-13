@@ -24,6 +24,8 @@ g:/xDoc/
 │   │   ├── NupkgReader.vb          # nupkg 解析（nuspec 元数据、icon、readme、lib 注释文档提取）
 │   │   ├── PackageApiDocs.vb       # 上传时从 nupkg 提取 api 文档并生成入库记录
 │   │   ├── ApiDocPages.vb          # 从数据库重建文档模型 + 读取模板服务端渲染三类文档页
+│   │   ├── SitemapGenerator.vb     # [新增] 站点地图：收集静态页/包详情页/文档页 url 并原子写出 sitemap.xml
+│   │   ├── SitemapScheduler.vb     # [新增] 站点地图调度：请求活动时钟 + 变更指纹 + 空闲期后台生成
 │   │   ├── TotpAuth.vb             # TOTP 注册与校验（每用户 128 字符盐）
 │   │   └── TotpModule.vb           # RFC 6238 实现（生成/校验/otpauth URI/自检）
 │   ├── xGet/                       # 客户端控制台程序
@@ -47,8 +49,9 @@ g:/xDoc/
 ├── test/                           # 命令行自检（TOTP RFC 6238 向量 + API 文档生成校验）
 ├── dist/
 │   ├── bin/                        # 编译输出（Nuget.dll、Fluteway、xGet 等）
-│   ├── wwwroot/                    # 前端站点（页面 + assets）
+│   ├── wwwroot/                    # 前端站点（页面 + assets，含 assets/sitemap.xsl）
 │   ├── template/                   # API 文档页模板（docs-index / docs-package / docs-type，可替换）
+│   ├── tmp/                        # 站点地图产物（sitemap.xml + sitemap.state），按 --tmp 生成
 │   ├── run.cmd / run.sh            # 启动脚本
 │   └── data/                       # 运行时数据（JSql 库 + 包文件），首次启动按 --data 自动创建
 ├── docs/build.txt                  # 原始需求与命令行示例
@@ -142,7 +145,14 @@ packages=./data/packages
 db=./data/db
 wwwroot=./wwwroot
 template=./template          ; API 文档页 html 模板目录，默认取 wwwroot 同级的 template
+tmp=./tmp                    ; 站点地图产物目录，默认取 wwwroot 同级的 tmp
 base-url=http://nuget.scibasic.net/
+
+; 站点地图
+sitemap-enabled=true
+sitemap-base-url=            ; 站点地图链接使用的域名；留空则回退 base-url，两者皆空则跳过生成并告警
+sitemap-idle-seconds=60      ; 控制器无请求达到该秒数才视为「服务器空闲」
+sitemap-interval-seconds=300 ; 变更/空闲检查的间隔（秒）
 
 ; 周期性聚类分析
 cluster-enabled=true
@@ -235,6 +245,15 @@ xGet batch    --server http://localhost:80 --email me@example.com --dir ./packag
 不计入；包/版本/类型不存在而返回 404 的请求也不计入。该计数会并入包与全站的每日活动序列，
 在 `about.html` 与包详情页的三线图中作为「doc views」曲线展示。
 
+### 站点地图（伪静态）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/sitemap.xml` | 站点地图 xml（`application/xml; charset=utf-8`），内容为 `tmp/` 目录中的生成产物 |
+
+文件不存在时（例如服务器尚未进入空闲窗口，或 `tmp/` 被清空）会在请求线程内即时生成一次；
+见第 13 节。
+
 ### 管理（需 TOTP：`email` + `code`）
 
 | 方法 | 路径 | 说明 |
@@ -312,6 +331,10 @@ API 文档页（`/docs/...`）由服务端渲染，不属于静态页面；静�
 `docs/index.html` 指向全局文档索引。文档页的 html 模板放在 `dist/template/`，
 样式与交互放在 `dist/wwwroot/assets/css/docs.css` 与 `dist/wwwroot/assets/js/docs.js`
 （`docs.js` 提供命名空间树筛选、侧栏折叠与锚点平滑跳转），两者都可以直接替换而无需重新编译。
+
+五个静态页面（`index` / `package` / `about` / `graph` / `tags`）都在 `<head>` 中以
+`<link rel="sitemap" type="application/xml" href="sitemap.xml">` 声明站点地图，并在页脚 legal 行
+加入了 `Sitemap` 文字链接，便于用户与搜索引擎发现 `/sitemap.xml`（见第 13 节）。
 
 ---
 
@@ -416,6 +439,50 @@ Dim document = extracted.Document
 
 自检：`dotnet run --project test/test.vbproj -- serverdocs [nupkg] [template]`
 （提取 → 入库 → 重建文档模型 → 渲染三类页面，全程不启动 http 服务）。
+
+---
+
+## 13. 站点地图（sitemap）
+
+`SitemapGenerator` 收集站点公开 url 并生成 sitemaps.org 0.9 规范的 xml，`SitemapScheduler` 负责
+「数据库变更 + 服务器空闲」的调度，两者都在服务端模块内部，产物落在 `tmp/` 目录（默认 `dist/tmp`）。
+
+收录范围（共三类，合计一条 `<url>` 一个 `<loc>`，附 `lastmod`）：
+
+| 类型 | 来源 |
+| --- | --- |
+| `page` | `wwwroot/` 顶层全部 `*.html`（`index.html` 归一为站点根 `/`，参数化的 `package.html` 除外） |
+| `package` | 每个已发布包 id 一条 `package.html?id=...`（详情页展示最新版本） |
+| `docs` | `/docs/index.html`、每个包版本的 `/docs/{id}/{version}/index.html`、该版本下每个类型的 `/docs/{id}/{version}/{typeFullName}.html` |
+
+url 的拼接直接复用 `ApiDocPages.PackageIndexUrl` 与 `DocUrls.NugetTypeUrl`，
+与路由侧 `Uri.UnescapeDataString` 的解码方式对称，不会出现转义不一致的死链。
+
+生成时机与状态：
+
+1. 上传成功（`indexApiDocs`）会调用 `SitemapScheduler.NotifyDocsChanged()` 置脏；
+2. 控制器每次写出响应（`writeRawJson` / `writeHtml` / `writeReadme` / `api/icon` / `/sitemap.xml`）
+   都会刷新共享的「最后请求时刻」（`Interlocked` 原子写，不阻塞请求路径）；
+3. 定时器按 `sitemap-interval-seconds`（默认 300s）检查：**有变更**（脏标记，或
+   `package_api_docs` 行数/最大 id、`packages` 行数/最大 id、最近发布时间组成的指纹与上次不同，
+   因此重启后依然能识别变更）**且空闲**（距最后一次控制器请求 ≥ `sitemap-idle-seconds`，默认 60s）
+   才生成；
+4. 生成时先写 `sitemap.xml.tmp` / `sitemap.state.tmp` 再 `File.Move(overwrite:=True)` 原子替换，
+   任何并发读者都不会读到半成品；`sitemap.state` 记录指纹、生成时间与 url 数，供重启后比对；
+5. 全过程包在 `Try/Catch` 内，失败只记 warning，绝不影响包发布与站点访问。
+
+访问与样式：
+
+- `/sitemap.xml` 伪静态路由返回 `tmp/sitemap.xml`（缺文件时在请求线程内受锁即时生成一次，仍不可用则 404）；
+- xml 头部带 `<?xml-stylesheet type="text/xsl" href="/assets/sitemap.xsl"?>`，
+  `wwwroot/assets/sitemap.xsl` 用 XSLT 1.0 把 `urlset` 渲染为与站点一致的深色页面
+  （复用 `assets/css/scibasic.css` 的设计令牌：等宽 url、类型徽标、`lastmod` 列、
+  顶部导航与页脚 legal 行）。浏览器要求样式表以 xml 媒体类型返回，
+  因此 `Service.Mount` 会幂等地把 `.xsl` 注册进 `MIME.SuffixTable`（失败仅告警）。
+
+注意：`HttpRouter.AppHandler` 先处理 `wwwroot` 静态文件、再查 CLR 路由，且框架没有可供模块挂钩的
+请求中间件，所以「最后请求时刻」只统计控制器流量（页面数据请求与文档页访问），
+纯静态文件访问不参与空闲判定。
 
 ---
 
