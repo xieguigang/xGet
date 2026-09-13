@@ -64,21 +64,46 @@ Public Class ApiDocOptions
     Public Property Clean As Boolean = True
 
     ''' <summary>
+    ''' Reflects the sibling clr assembly of every xml comment document to
+    ''' supplement the members which carry no xml comment (for example the
+    ''' undocumented members of an enum). only the public members are
+    ''' supplemented, and a reflection failure is only a warning.
+    ''' </summary>
+    ''' <returns></returns>
+    Public Property ReflectSupplement As Boolean = True
+
+    ''' <summary>
+    ''' Check the input option, returns an error message when the input is
+    ''' invalid, or nothing when everything is fine. The output directory is not
+    ''' required by the data extract stage.
+    ''' </summary>
+    ''' <returns></returns>
+    Friend Function ValidateInput() As String
+        If String.IsNullOrWhiteSpace(Input) Then
+            Return "the input path is required."
+        End If
+
+        If Not File.Exists(Input) AndAlso Not Directory.Exists(Input) Then
+            Return $"the input path does not exist: {Input}"
+        End If
+
+        Return Nothing
+    End Function
+
+    ''' <summary>
     ''' Check the options, returns an error message when the options are invalid,
     ''' or nothing when everything is fine.
     ''' </summary>
     ''' <returns></returns>
     Friend Function Validate() As String
-        If String.IsNullOrWhiteSpace(Input) Then
-            Return "the input path is required."
+        Dim errorMessage As String = ValidateInput()
+
+        If Not String.IsNullOrEmpty(errorMessage) Then
+            Return errorMessage
         End If
 
         If String.IsNullOrWhiteSpace(Output) Then
             Return "the output directory is required."
-        End If
-
-        If Not File.Exists(Input) AndAlso Not Directory.Exists(Input) Then
-            Return $"the input path does not exist: {Input}"
         End If
 
         Return Nothing

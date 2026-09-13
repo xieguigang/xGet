@@ -12,7 +12,7 @@ Imports Microsoft.VisualBasic.MIME.text.markdown
 ''' </summary>
 Public Class CommentMarkdown
 
-    Private ReadOnly site As ApiDocSite
+    Private ReadOnly index As ApiDocIndex
     Private ReadOnly baseUrl As String
     Private ReadOnly render As New MarkdownRender()
     Private ReadOnly cache As New Dictionary(Of String, String)
@@ -26,8 +26,8 @@ Public Class CommentMarkdown
         "<a\s+href=""cref:(?<id>[^""]*)""[^>]*>(?<text>.*?)</a>",
         RegexOptions.Singleline Or RegexOptions.IgnoreCase)
 
-    Public Sub New(site As ApiDocSite, baseUrl As String)
-        Me.site = site
+    Public Sub New(index As ApiDocIndex, baseUrl As String)
+        Me.index = index
         Me.baseUrl = If(baseUrl, "")
     End Sub
 
@@ -72,7 +72,7 @@ Public Class CommentMarkdown
     Private Function resolveCref(m As Match) As String
         Dim text As String = m.Groups("text").Value
         Dim id As String = decodeCrefId(m.Groups("id").Value)
-        Dim url As String = site.ResolveUrl(id)
+        Dim url As String = If(index Is Nothing, Nothing, index.ResolveUrl(id))
 
         If String.IsNullOrEmpty(url) Then
             ' the target is not a part of the current document site, so it is

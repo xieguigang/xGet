@@ -149,6 +149,180 @@ Public Module NupkgReader
     End Function
 
     ''' <summary>
+    ''' extract the xml comment documents (and the sibling clr assemblies which
+    ''' are used by the reflection supplement) of the ``lib`` folder into the
+    ''' given destination folder.
+    ''' 
+    ''' a package may ship several target frameworks; the target framework folder
+    ''' with the highest priority which actually contains an xml comment document
+    ''' is used, and the entries are flattened into the destination folder so
+    ''' that every ``*.xml`` finds its sibling ``*.dll`` by the file name.
+    ''' </summary>
+    ''' <param name="nupkgPath">the physical nupkg path.</param>
+    ''' <param name="destination">the folder to extract the comment documents to.</param>
+    ''' <returns>the number of the extracted xml comment documents.</returns>
+    Public Function ExtractLibComments(nupkgPath As String, destination As String) As Integer
+        Using zip As ZipArchive = ZipFile.OpenRead(nupkgPath)
+            Dim groups As New Dictionary(Of String, List(Of ZipArchiveEntry))(StringComparer.OrdinalIgnoreCase)
+
+            For Each entry As ZipArchiveEntry In zip.Entries
+                Dim name As String = entry.FullName.Replace("\"c, "/"c)
+
+                If Not name.StartsWith("lib/", StringComparison.OrdinalIgnoreCase) Then
+                    Continue For
+                End If
+
+                If entry.Length = 0 Then
+                    Continue For
+                End If
+
+                Dim extension As String = Path.GetExtension(name).ToLowerInvariant()
+
+                If extension <> ".xml" AndAlso extension <> ".dll" AndAlso extension <> ".exe" Then
+                    Continue For
+                End If
+
+                Dim folder As String = getDirectoryName(name)
+                Dim list As List(Of ZipArchiveEntry) = Nothing
+
+                If Not groups.TryGetValue(folder, list) Then
+                    list = New List(Of ZipArchiveEntry)
+                    groups(folder) = list
+                End If
+
+                Call list.Add(entry)
+            Next
+
+            ' pick the highest priority framework folder which ships a comment document
+            Dim best As List(Of ZipArchiveEntry) = Nothing
+            Dim bestRank As Integer = Integer.MinValue
+
+            For Each item In groups
+                Dim hasXml As Boolean = item.Value.Any(Function(e) Path.GetExtension(e.FullName).Equals(".xml", StringComparison.OrdinalIgnoreCase))
+
+                If Not hasXml Then
+                    Continue For
+                End If
+
+                Dim rank As Integer = TfmRank(tfmOf(item.Key))
+
+                If best Is Nothing OrElse rank > bestRank Then
+                    best = item.Value
+                    bestRank = rank
+                End If
+            Next
+
+            If best Is Nothing Then
+                Return 0
+            End If
+
+            Call Directory.CreateDirectory(destination)
+
+            Dim count As Integer = 0
+
+            For Each entry As ZipArchiveEntry In best
+                Dim target As String = Path.Combine(destination, Path.GetFileName(entry.FullName))
+
+                If String.IsNullOrEmpty(Path.GetFileName(target)) Then
+                    Continue For
+                End If
+
+                Try
+                    Call entry.ExtractToFile(target, overwrite:=True)
+
+                    If Path.GetExtension(target).Equals(".xml", StringComparison.OrdinalIgnoreCase) Then
+                        count += 1
+                    End If
+                Catch ex As Exception
+                    ' a single unreadable entry should not break the whole extraction
+                End Try
+            Next
+
+            Return count
+        End Using
+    End Function
+
+    ''' <summary>
+    ''' the directory part of a package relative entry path
+    ''' </summary>
+    Private Function getDirectoryName(name As String) As String
+        Dim index As Integer = name.LastIndexOf("/"c)
+
+        If index <= 0 Then
+            Return "lib"
+        End If
+
+        Return name.Substring(0, index)
+    End Function
+
+    ''' <summary>
+    ''' the target framework moniker of a ``lib/&lt;tfm&gt;`` folder
+    ''' </summary>
+    Private Function tfmOf(folder As String) As String
+        Dim parts = folder.Split("/"c)
+
+        If parts.Length >= 2 Then
+            Return parts(1)
+        End If
+
+        Return ""
+    End Function
+
+    ''' <summary>
+    ''' the priority of a target framework moniker; a higher value wins.
+    ''' ``net10.0`` &gt; ``netstandard2.0`` &gt; ``net48``.
+    ''' </summary>
+    Private Function TfmRank(tfm As String) As Integer
+        If String.IsNullOrWhiteSpace(tfm) Then
+            Return 0
+        End If
+
+        Dim text As String = tfm.Trim().ToLowerInvariant()
+
+        If text.StartsWith("netstandard", StringComparison.Ordinal) Then
+            Return 5000 + versionRank(text.Substring("netstandard".Length))
+        End If
+
+        If text.StartsWith("netcoreapp", StringComparison.Ordinal) Then
+            Return 7000 + versionRank(text.Substring("netcoreapp".Length))
+        End If
+
+        If text.StartsWith("net", StringComparison.Ordinal) Then
+            Dim rest As String = text.Substring("net".Length)
+
+            ' a dotted moniker (net10.0) is a modern .net, a two/three digit
+            ' moniker (net48) is the legacy .net framework.
+            If rest.Contains(".") OrElse rest.Length = 0 Then
+                Return 10000 + versionRank(rest)
+            End If
+
+            If rest.Length <= 3 Then
+                Return 100 + versionRank(rest)
+            End If
+
+            Return 10000 + versionRank(rest)
+        End If
+
+        Return 1000
+    End Function
+
+    Private Function versionRank(version As String) As Integer
+        Dim parts = If(version, "").Split("."c)
+        Dim major As Integer = 0
+        Dim minor As Integer = 0
+
+        If parts.Length > 0 Then
+            Integer.TryParse(parts(0), major)
+        End If
+
+        If parts.Length > 1 Then
+            Integer.TryParse(parts(1), minor)
+        End If
+
+        Return major * 100 + minor
+    End Function
+
+    ''' <summary>
     ''' locate an entry by its package relative path, tolerating the path
     ''' separators of the nuspec and a missing leading folder.
     ''' </summary>

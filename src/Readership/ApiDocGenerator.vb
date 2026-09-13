@@ -48,35 +48,70 @@ Public Class DocBuildResult
 End Class
 
 ''' <summary>
+''' The result of the data extract stage of the api reference document
+''' generator: the extracted document data and the non fatal warnings.
+''' </summary>
+Public Class ApiDocExtractResult
+
+    ''' <summary>
+    ''' the extracted, serializable document data
+    ''' </summary>
+    ''' <returns></returns>
+    Public Property Document As ApiDocDocument
+
+    ''' <summary>
+    ''' the non fatal problems that are found during the extraction
+    ''' </summary>
+    ''' <returns></returns>
+    Public ReadOnly Property Warnings As New List(Of String)
+
+    Public Overrides Function ToString() As String
+        If Document Is Nothing Then
+            Return "namespaces=0; types=0; members=0"
+        End If
+
+        Return $"namespaces={Document.NamespaceCount()}; types={Document.TypeCount()}; members={Document.MemberCount()}"
+    End Function
+End Class
+
+''' <summary>
 ''' The api reference document generator: it loads the .net xml comment documents
-''' (see <see cref="ProjectSpace"/>) and generates a static html document site.
+''' (see <see cref="ProjectSpace"/>) and generates the api reference documents.
+''' 
+''' The generation is split into two independent steps:
+''' 
+''' + <see cref="Extract"/>: parse the xml comment documents (and optionally
+'''   reflect the sibling clr assemblies to supplement the missing members) and
+'''   produce a serializable <see cref="ApiDocDocument"/>;
+''' + the page renderers (see <see cref="IndexPageWriter"/>,
+'''   <see cref="TypePageWriter"/> and <see cref="ApiDocRenderer"/>): render a
+'''   specific page from the extracted document data.
 ''' </summary>
 Public Module ApiDoc
 
     ''' <summary>
-    ''' Generate the static api reference document site from the given options.
+    ''' Extract the document data from the given options. This is the first
+    ''' (data extraction) step of the document generation.
     ''' </summary>
     ''' <param name="options"></param>
     ''' <returns></returns>
-    Public Function Generate(options As ApiDocOptions) As DocBuildResult
+    Public Function Extract(options As ApiDocOptions) As ApiDocExtractResult
         If options Is Nothing Then
             Throw New ArgumentNullException(NameOf(options))
         End If
 
-        Dim errorMessage$ = options.Validate()
+        Dim errorMessage$ = options.ValidateInput()
 
         If Not String.IsNullOrEmpty(errorMessage) Then
             Throw New ArgumentException(errorMessage, NameOf(options))
         End If
 
-        Dim result As New DocBuildResult With {
-            .Output = Path.GetFullPath(options.Output),
-            .Title = options.Title
-        }
+        Dim result As New ApiDocExtractResult
         Dim documents$() = resolveDocuments(options.Input, result.Warnings)
 
         If documents.Length = 0 Then
-            result.Warnings.Add($"no xml comment document was found from: {options.Input}")
+            Call result.Warnings.Add($"no xml comment document was found from: {options.Input}")
+            result.Document = ApiDocDocument.Empty()
             Return result
         End If
 
@@ -91,7 +126,49 @@ Public Module ApiDoc
             End Try
         Next
 
-        Dim site As ApiDocSite = ApiDocSite.Build(space, result.Warnings)
+        result.Document = DocExtractor.BuildDocument(space, result.Warnings)
+
+        With result.Document
+            .title = options.Title
+            .subTitle = options.SubTitle
+            .description = options.Description
+        End With
+
+        ' ---- reflect the sibling clr assemblies to supplement the missing members ----
+        If options.ReflectSupplement Then
+            Try
+                Call DocReflection.Supplement(result.Document, documents, result.Warnings)
+            Catch ex As Exception
+                Call result.Warnings.Add($"reflection supplement failed: {ex.Message}")
+            End Try
+        End If
+
+        If result.Document.TypeCount() = 0 Then
+            Call result.Warnings.Add("no type was loaded from the given xml comment documents.")
+        End If
+
+        ' the extracted document carries the urls of the offline static site by default
+        Call DocUrls.ApplyStaticSite(result.Document)
+
+        Return result
+    End Function
+
+    ''' <summary>
+    ''' Extract the document data and generate the offline static html document
+    ''' site from the given options.
+    ''' </summary>
+    ''' <param name="options"></param>
+    ''' <returns></returns>
+    Public Function Generate(options As ApiDocOptions) As DocBuildResult
+        Dim extracted As ApiDocExtractResult = Extract(options)
+        Dim document As ApiDocDocument = extracted.Document
+
+        Dim result As New DocBuildResult With {
+            .Output = Path.GetFullPath(options.Output),
+            .Title = options.Title
+        }
+
+        Call result.Warnings.AddRange(extracted.Warnings)
 
         ' ---- output directory & theme assets ----
         Call Directory.CreateDirectory(result.Output)
@@ -105,33 +182,31 @@ Public Module ApiDoc
 
         ' ---- render the pages ----
         Dim ctx As New DocSiteContext With {
-            .Site = site,
+            .Document = document,
+            .Index = New ApiDocIndex(document),
             .Options = options,
-            .Theme = theme
+            .Theme = theme,
+            .AbsoluteUrls = False
         }
 
         Call writeFile(result.Output, "index.html", IndexPageWriter.Render(ctx))
         result.PageCount += 1
 
-        For Each ns As DocNamespaceEntry In site.Namespaces
-            Call writeFile(result.Output, ns.Url, NamespacePageWriter.Render(ctx, ns))
+        For Each ns As ApiDocNamespace In document.namespaces
+            Call writeFile(result.Output, ns.url, NamespacePageWriter.Render(ctx, ns))
             result.PageCount += 1
         Next
 
-        For Each t As DocTypeEntry In site.Types
-            Call writeFile(result.Output, t.Url, TypePageWriter.Render(ctx, t))
+        For Each t As ApiDocType In document.types
+            Call writeFile(result.Output, t.url, TypePageWriter.Render(ctx, t))
             result.PageCount += 1
         Next
 
         ' ---- build result ----
-        result.Assemblies = site.AssemblyNames
-        result.NamespaceCount = site.Namespaces.Count
-        result.TypeCount = site.Types.Count
-        result.MemberCount = site.MemberCount
-
-        If site.Types.Count = 0 Then
-            Call result.Warnings.Add("no type was loaded from the given xml comment documents.")
-        End If
+        result.Assemblies = document.AssemblyNames()
+        result.NamespaceCount = document.NamespaceCount()
+        result.TypeCount = document.TypeCount()
+        result.MemberCount = document.MemberCount()
 
         Return result
     End Function

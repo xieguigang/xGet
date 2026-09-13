@@ -106,6 +106,36 @@ Public Class PackageClusterRecord
 End Class
 
 ''' <summary>
+''' one api comment document row of a package version. the <see cref="payload"/>
+''' is the json document data of one type, and the scalar columns are used to
+''' build the document index pages without decoding the payload.
+''' </summary>
+Public Class PackageApiDocRecord
+    Public Property id As Long
+    Public Property package_id As String
+    Public Property version As String
+
+    ''' <summary>the full name of the namespace that the type belongs to.</summary>
+    Public Property namespace_name As String
+
+    ''' <summary>the markdown comment document of the namespace.</summary>
+    Public Property namespace_summary As String
+
+    ''' <summary>the full name of the type, it is the lookup key of the type page.</summary>
+    Public Property type_fullname As String
+
+    Public Property type_name As String
+
+    ''' <summary>the markdown comment document of the type.</summary>
+    Public Property summary As String
+
+    Public Property member_count As Integer
+
+    ''' <summary>the json document data of the <c>ApiDocType</c>.</summary>
+    Public Property payload As String
+End Class
+
+''' <summary>
 ''' a thin data access layer over the <see cref="SqlEngine"/> JSql engine.
 ''' </summary>
 ''' <remarks>
@@ -202,6 +232,19 @@ Public Class NugetStore
                 "  cluster INT," &
                 "  updated DATETIME" &
                 ") COMMENT='umap 3d embedding and kmeans cluster label'")
+            Call engine.Execute(
+                "CREATE TABLE IF NOT EXISTS package_api_docs (" &
+                "  id INT NOT NULL PRIMARY KEY," &
+                "  package_id VARCHAR(200) NOT NULL," &
+                "  version VARCHAR(100) NOT NULL," &
+                "  namespace VARCHAR(300)," &
+                "  namespace_summary VARCHAR(2000)," &
+                "  type_fullname VARCHAR(400) NOT NULL," &
+                "  type_name VARCHAR(200)," &
+                "  summary VARCHAR(2000)," &
+                "  member_count INT DEFAULT 0," &
+                "  payload LONGTEXT" &
+                ") COMMENT='per package version api comment documents'")
         End SyncLock
     End Sub
 
@@ -1012,6 +1055,174 @@ Public Class NugetStore
             .ToList()
 
         Return If(versions.Count = 0, "", versions.Last().version)
+    End Function
+
+#End Region
+
+#Region "package api documents"
+
+    ''' <summary>
+    ''' replace the api comment documents of one package version.
+    ''' </summary>
+    ''' <param name="packageId">the package id.</param>
+    ''' <param name="version">the package version.</param>
+    ''' <param name="records">the per type document rows.</param>
+    Public Sub ReplacePackageApiDocs(packageId As String, version As String, records As IEnumerable(Of PackageApiDocRecord))
+        SyncLock sync
+            Call exec($"DELETE FROM package_api_docs WHERE package_id = '{esc(packageId)}' AND version = '{esc(version)}'")
+
+            If records Is Nothing Then
+                Return
+            End If
+
+            Dim id As Long = nextId("package_api_docs")
+
+            For Each record As PackageApiDocRecord In records
+                If record Is Nothing OrElse String.IsNullOrEmpty(record.type_fullname) Then
+                    Continue For
+                End If
+
+                Call exec(
+                    "INSERT INTO package_api_docs (id, package_id, version, namespace, namespace_summary, type_fullname, type_name, summary, member_count, payload) VALUES (" &
+                    $"{id}, '{esc(record.package_id)}', '{esc(record.version)}', '{esc(record.namespace_name)}', '{esc(record.namespace_summary)}', '{esc(record.type_fullname)}', '{esc(record.type_name)}', '{esc(record.summary)}', {record.member_count}, '{esc(record.payload)}')")
+
+                id += 1
+            Next
+        End SyncLock
+    End Sub
+
+    ''' <summary>
+    ''' delete the api comment documents of one package version.
+    ''' </summary>
+    ''' <param name="packageId"></param>
+    ''' <param name="version"></param>
+    Public Sub DeletePackageApiDocs(packageId As String, version As String)
+        SyncLock sync
+            Call exec($"DELETE FROM package_api_docs WHERE package_id = '{esc(packageId)}' AND version = '{esc(version)}'")
+        End SyncLock
+    End Sub
+
+    ''' <summary>
+    ''' read the type document rows of one package version, including the payload.
+    ''' </summary>
+    ''' <param name="packageId"></param>
+    ''' <param name="version"></param>
+    ''' <returns></returns>
+    Public Function ReadPackageApiDocs(packageId As String, version As String) As List(Of PackageApiDocRecord)
+        Return queryApiDocs(includePayload:=True, packageId:=packageId, version:=version)
+    End Function
+
+    ''' <summary>
+    ''' read the type index rows (without the payload) of one package version.
+    ''' </summary>
+    ''' <param name="packageId"></param>
+    ''' <param name="version"></param>
+    ''' <returns></returns>
+    Public Function ReadPackageApiDocIndex(packageId As String, version As String) As List(Of PackageApiDocRecord)
+        Return queryApiDocs(includePayload:=False, packageId:=packageId, version:=version)
+    End Function
+
+    ''' <summary>
+    ''' read the type index rows of every package version (without the payload).
+    ''' </summary>
+    ''' <returns></returns>
+    Public Function ReadApiDocIndex() As List(Of PackageApiDocRecord)
+        Return queryApiDocs(includePayload:=False)
+    End Function
+
+    ''' <summary>
+    ''' read the document row of one type (including the payload).
+    ''' </summary>
+    ''' <param name="packageId"></param>
+    ''' <param name="version"></param>
+    ''' <param name="typeFullName"></param>
+    ''' <returns></returns>
+    Public Function GetPackageApiDoc(packageId As String, version As String, typeFullName As String) As PackageApiDocRecord
+        If String.IsNullOrEmpty(typeFullName) Then
+            Return Nothing
+        End If
+
+        Return ReadPackageApiDocs(packageId, version) _
+            .FirstOrDefault(Function(r) String.Equals(r.type_fullname, typeFullName, StringComparison.OrdinalIgnoreCase))
+    End Function
+
+    ''' <summary>
+    ''' test whether a package version has any api comment document.
+    ''' </summary>
+    ''' <param name="packageId"></param>
+    ''' <param name="version"></param>
+    ''' <returns></returns>
+    Public Function HasPackageApiDocs(packageId As String, version As String) As Boolean
+        Return ReadPackageApiDocIndex(packageId, version).Count > 0
+    End Function
+
+    ''' <summary>
+    ''' the versions of a package which have api comment documents, ordered by the
+    ''' nuget version order.
+    ''' </summary>
+    ''' <param name="packageId"></param>
+    ''' <returns></returns>
+    Public Function GetPackageApiDocVersions(packageId As String) As List(Of String)
+        Return queryApiDocs(includePayload:=False, packageId:=packageId) _
+            .Select(Function(r) r.version) _
+            .Where(Function(v) Not String.IsNullOrEmpty(v)) _
+            .Distinct(StringComparer.OrdinalIgnoreCase) _
+            .OrderBy(Function(v) VersionKey(v)) _
+            .ToList()
+    End Function
+
+    Private Function queryApiDocs(includePayload As Boolean, Optional packageId As String = "", Optional version As String = "") As List(Of PackageApiDocRecord)
+        Dim columns As String = "id, package_id, version, namespace, namespace_summary, type_fullname, type_name, summary, member_count" &
+            If(includePayload, ", payload", "")
+        Dim where As String = ""
+
+        If Not String.IsNullOrEmpty(packageId) Then
+            where = $" WHERE package_id = '{esc(packageId)}'"
+        End If
+
+        Dim list As New List(Of PackageApiDocRecord)
+
+        SyncLock sync
+            Dim rs As ResultSet = query($"SELECT {columns} FROM package_api_docs{where}")
+
+            If rs Is Nothing OrElse Not rs.IsQuery Then
+                Return list
+            End If
+
+            For Each row As Object() In rs.Rows
+                Dim record As PackageApiDocRecord = readApiDoc(rs.Columns, row)
+
+                If Not String.IsNullOrEmpty(version) AndAlso
+                   Not String.Equals(record.version, version, StringComparison.OrdinalIgnoreCase) Then
+                    Continue For
+                End If
+
+                Call list.Add(record)
+            Next
+        End SyncLock
+
+        Return list
+    End Function
+
+    Private Shared Function readApiDoc(columns As List(Of String), row As Object()) As PackageApiDocRecord
+        Dim record As New PackageApiDocRecord
+
+        For i As Integer = 0 To columns.Count - 1
+            Select Case columns(i).ToLowerInvariant()
+                Case "id" : record.id = toLong(row(i))
+                Case "package_id" : record.package_id = toStr(row(i))
+                Case "version" : record.version = toStr(row(i))
+                Case "namespace" : record.namespace_name = toStr(row(i))
+                Case "namespace_summary" : record.namespace_summary = toStr(row(i))
+                Case "type_fullname" : record.type_fullname = toStr(row(i))
+                Case "type_name" : record.type_name = toStr(row(i))
+                Case "summary" : record.summary = toStr(row(i))
+                Case "member_count" : record.member_count = CInt(toLong(row(i)))
+                Case "payload" : record.payload = toStr(row(i))
+            End Select
+        Next
+
+        Return record
     End Function
 
 #End Region

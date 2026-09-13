@@ -81,18 +81,30 @@ Public Module DocHtml
     ''' <param name="name"></param>
     ''' <returns></returns>
     Public Function DisplayTypeName(name As String) As String
-        Return ApiDocSite.ShortTypeName(name)
+        Return DocNaming.ShortTypeName(name)
     End Function
 End Module
 
 ''' <summary>
-''' The shared page rendering context of the api reference document site.
+''' The shared page rendering context of the api reference document site. It
+''' bridges the extracted <see cref="ApiDocDocument"/> data to the html page
+''' renderers: both the offline static site generation and the nuget server side
+''' document pages render from this very context.
 ''' </summary>
 Public Class DocSiteContext
 
-    Public Property Site As ApiDocSite
+    Public Property Document As ApiDocDocument
+    Public Property Index As ApiDocIndex
     Public Property Options As ApiDocOptions
     Public Property Theme As ThemeBundle
+
+    ''' <summary>
+    ''' when it is True the page urls of the document are absolute (the nuget
+    ''' server side pages), otherwise they are relative to the document root (the
+    ''' offline static site).
+    ''' </summary>
+    ''' <returns></returns>
+    Public Property AbsoluteUrls As Boolean
 
     ''' <summary>
     ''' the site title, example as ``API Reference``
@@ -100,16 +112,49 @@ Public Class DocSiteContext
     ''' <returns></returns>
     Public ReadOnly Property Title As String
         Get
-            Return If(Options Is Nothing, "API Reference", Options.Title)
+            If Options IsNot Nothing AndAlso Not String.IsNullOrEmpty(Options.Title) Then
+                Return Options.Title
+            End If
+
+            If Document IsNot Nothing AndAlso Not String.IsNullOrEmpty(Document.title) Then
+                Return Document.title
+            End If
+
+            Return "API Reference"
+        End Get
+    End Property
+
+    Public ReadOnly Property SubTitle As String
+        Get
+            If Options IsNot Nothing Then
+                Return Options.SubTitle
+            End If
+
+            Return If(Document?.subTitle, "")
+        End Get
+    End Property
+
+    Public ReadOnly Property Description As String
+        Get
+            If Options IsNot Nothing Then
+                Return Options.Description
+            End If
+
+            Return If(Document?.description, "")
         End Get
     End Property
 
     ''' <summary>
-    ''' the relative url prefix that jumps from the given page back to the site root
+    ''' the relative url prefix that jumps from the given page back to the site
+    ''' root. It is always empty when the document urls are absolute.
     ''' </summary>
     ''' <param name="pageUrl"></param>
     ''' <returns></returns>
     Public Function BaseUrl(pageUrl As String) As String
+        If AbsoluteUrls Then
+            Return ""
+        End If
+
         Dim depth As Integer = 0
 
         If Not String.IsNullOrEmpty(pageUrl) Then
@@ -130,7 +175,7 @@ Public Class DocSiteContext
     End Function
 
     Public Function Markdown(pageUrl As String) As CommentMarkdown
-        Return New CommentMarkdown(Site, BaseUrl(pageUrl))
+        Return New CommentMarkdown(Index, BaseUrl(pageUrl))
     End Function
 
     ''' <summary>
@@ -168,10 +213,10 @@ Public Class DocSiteContext
                 Continue For
             End If
 
-            Dim entry As DocNamespaceEntry = Nothing
+            Dim entry As ApiDocNamespace = If(Index, Nothing)?.FindNamespace(path)
 
-            If Site.NamespaceByName.TryGetValue(path, entry) Then
-                sb.Append($" / <a href=""{base}{entry.Url}"">{DocHtml.Escape(segment)}</a>")
+            If entry IsNot Nothing AndAlso Not String.IsNullOrEmpty(entry.url) Then
+                sb.Append($" / <a href=""{base}{entry.url}"">{DocHtml.Escape(segment)}</a>")
             Else
                 sb.Append($" / <span class=""crumb"">{DocHtml.Escape(segment)}</span>")
             End If
@@ -188,14 +233,14 @@ Public Class DocSiteContext
     ''' <param name="pageUrl"></param>
     ''' <returns></returns>
     Public Function RenderTypeReference(typeReference As String, pageUrl As String) As String
-        Dim text$ = ApiDocSite.DisplayTypeReference(typeReference)
+        Dim text$ = DocNaming.DisplayTypeReference(typeReference)
 
         If text.Length = 0 Then
             Return ""
         End If
 
         Dim title$ = DocHtml.Attr(typeReference)
-        Dim url$ = Site.ResolveUrl(ApiDocSite.TypeCref(typeReference))
+        Dim url$ = If(Index, Nothing)?.ResolveUrl(DocNaming.TypeCref(typeReference))
 
         If String.IsNullOrEmpty(url) Then
             Return $"<code class=""sig-type"" title=""{title}"">{DocHtml.Escape(text)}</code>"
@@ -213,9 +258,9 @@ Public Class DocSiteContext
     ''' <param name="member"></param>
     ''' <param name="pageUrl"></param>
     ''' <returns></returns>
-    Public Function MemberSignature(typeEntry As DocTypeEntry, member As DocMemberEntry, pageUrl As String) As String
-        Dim signature$ = member.Signature(typeEntry)
-        Dim types$() = ApiDocSite.ParseParameterTypes(signature)
+    Public Function MemberSignature(typeEntry As ApiDocType, member As ApiDocMember, pageUrl As String) As String
+        Dim signature$ = member.signature(If(typeEntry, Nothing)?.fullName)
+        Dim types$() = DocNaming.ParseParameterTypes(signature)
         Dim openIndex As Integer = signature.IndexOf("("c)
 
         If types.Length = 0 OrElse openIndex <= 0 Then
@@ -237,11 +282,13 @@ Public Class DocSiteContext
 
         sb.Append(")")
 
-        Return sb.ToString
+        Return sb.ToString()
     End Function
 
     ''' <summary>
-    ''' render the whole html page with the shared header, sidebar tree and footer
+    ''' render the whole html page with the shared header, sidebar tree and footer.
+    ''' This built-in shell is used by the offline static document site; the nuget
+    ''' server side pages are composed from the replaceable template files.
     ''' </summary>
     ''' <param name="pageUrl">the site relative url of the current page</param>
     ''' <param name="pageTitle">the title of the current page</param>
@@ -259,9 +306,11 @@ Public Class DocSiteContext
         sb.AppendLine($"<title>{DocHtml.Escape(pageTitle)} · {DocHtml.Escape(Title)}</title>")
         sb.AppendLine($"<link rel=""icon"" type=""image/png"" href=""{base}favicon.png"" />")
 
-        For Each css As String In Theme.Css
-            sb.AppendLine($"<link rel=""stylesheet"" href=""{base}{css}"" />")
-        Next
+        If Theme IsNot Nothing Then
+            For Each css As String In Theme.Css
+                sb.AppendLine($"<link rel=""stylesheet"" href=""{base}{css}"" />")
+            Next
+        End If
 
         ' restore the sidebar collapse state before the body is rendered, so that
         ' the page will not flicker between the expanded and the collapsed state.
@@ -275,7 +324,7 @@ Public Class DocSiteContext
         sb.AppendLine($"<a class=""brand"" href=""{base}index.html"">")
         sb.AppendLine($"<img src=""{base}favicon.png"" alt=""logo"" onerror=""this.style.display='none'"" />")
         sb.AppendLine($"<strong>{DocHtml.Escape(Title)}</strong>")
-        sb.AppendLine($"<span class=""sub"">{DocHtml.Escape(Options.SubTitle)}</span>")
+        sb.AppendLine($"<span class=""sub"">{DocHtml.Escape(SubTitle)}</span>")
         sb.AppendLine("</a>")
         sb.AppendLine("<nav class=""topnav"">")
         sb.AppendLine($"<a{(If(String.Equals(pageUrl, "index.html", StringComparison.OrdinalIgnoreCase), " class=""on""", ""))} href=""{base}index.html"">Overview</a>")
@@ -291,7 +340,7 @@ Public Class DocSiteContext
         ' --- body shell ---
         sb.AppendLine("<div class=""doc-shell"">")
         sb.AppendLine("<aside class=""doc-side"">")
-        sb.AppendLine(Sidebar(pageUrl))
+        sb.AppendLine(Sidebar(ActiveNamespace(pageUrl), pageUrl))
         sb.AppendLine("</aside>")
         sb.AppendLine("<main class=""doc-main"">")
         sb.AppendLine("<div class=""wrap doc-wrap"">")
@@ -302,18 +351,20 @@ Public Class DocSiteContext
 
         ' --- footer ---
         sb.AppendLine("<footer class=""site"">")
-        sb.AppendLine($"<div class=""legal"">generated by Readership · {DocHtml.Escape(Theme.Name)} theme · {Date.Now.ToString("yyyy-MM-dd")}</div>")
-        sb.AppendLine($"<div class=""legal"">{Site.Namespaces.Count} namespaces · {Site.Types.Count} types · {Site.MemberCount} members</div>")
+        sb.AppendLine($"<div class=""legal"">generated by Readership · {DocHtml.Escape(If(Theme?.Name, ""))} theme · {Date.Now.ToString("yyyy-MM-dd")}</div>")
+        sb.AppendLine($"<div class=""legal"">{Document.NamespaceCount()} namespaces · {Document.TypeCount()} types · {Document.MemberCount()} members</div>")
         sb.AppendLine("</footer>")
 
-        For Each js As String In Theme.Js
-            sb.AppendLine($"<script src=""{base}{js}""></script>")
-        Next
+        If Theme IsNot Nothing Then
+            For Each js As String In Theme.Js
+                sb.AppendLine($"<script src=""{base}{js}""></script>")
+            Next
+        End If
 
         sb.AppendLine("</body>")
         sb.AppendLine("</html>")
 
-        Return sb.ToString
+        Return sb.ToString()
     End Function
 
     ''' <summary>
@@ -321,12 +372,11 @@ Public Class DocSiteContext
     ''' only displays its own segment name, and the ancestor chain of the
     ''' namespace that the current page belongs to is expanded automatically.
     ''' </summary>
-    ''' <param name="pageUrl"></param>
+    ''' <param name="activeNs">the active namespace full name</param>
+    ''' <param name="currentUrl">the url of the current page</param>
     ''' <returns></returns>
-    Public Function Sidebar(pageUrl As String) As String
-        Dim base$ = BaseUrl(pageUrl)
-        Dim activeNs$ = ActiveNamespace(pageUrl)
-        Dim tree As FileSystemTree = Site.NamespaceTree
+    Public Function Sidebar(activeNs As String, currentUrl As String) As String
+        Dim tree As FileSystemTree = If(Index, Nothing)?.NamespaceTree
         Dim sb As New StringBuilder
 
         sb.AppendLine("<div class=""doc-side-head"">")
@@ -335,14 +385,14 @@ Public Class DocSiteContext
         sb.AppendLine("<nav class=""doc-tree"" id=""doc-tree"">")
 
         If tree Is Nothing OrElse tree.Files Is Nothing OrElse tree.Files.Count = 0 Then
-            sb.AppendLine(SidebarGlobal(pageUrl, base))
+            sb.AppendLine(SidebarGlobal(currentUrl))
         Else
-            sb.AppendLine(SidebarGlobal(pageUrl, base))
+            sb.AppendLine(SidebarGlobal(currentUrl))
             sb.AppendLine("<ul class=""doc-children doc-root"">")
 
             For Each node As FileSystemTree In tree.Files.Values.OrderBy(Function(n) n.Name)
                 sb.AppendLine("<li>")
-                sb.AppendLine(RenderNamespaceNode(node, pageUrl, base, activeNs))
+                sb.AppendLine(RenderNamespaceNode(node, currentUrl, activeNs))
                 sb.AppendLine("</li>")
             Next
 
@@ -351,32 +401,37 @@ Public Class DocSiteContext
 
         sb.AppendLine("</nav>")
 
-        Return sb.ToString
+        Return sb.ToString()
     End Function
 
     ''' <summary>
     ''' render the global namespace (the namespace name is empty) as the first
     ''' level node of the sidebar tree
     ''' </summary>
-    ''' <param name="pageUrl"></param>
-    ''' <param name="base"></param>
+    ''' <param name="currentUrl"></param>
     ''' <returns></returns>
-    Private Function SidebarGlobal(pageUrl As String, base As String) As String
-        Dim entry As DocNamespaceEntry = Nothing
+    Private Function SidebarGlobal(currentUrl As String) As String
+        Dim entry As ApiDocNamespace = If(Index, Nothing)?.FindNamespace("")
 
-        If Not Site.NamespaceByName.TryGetValue("", entry) Then
+        If entry Is Nothing Then
             Return ""
         End If
 
-        Dim onAttr$ = If(String.Equals(entry.Url, pageUrl, StringComparison.OrdinalIgnoreCase), " class=""on""", "")
+        Dim onAttr$ = If(String.Equals(entry.url, currentUrl, StringComparison.OrdinalIgnoreCase), " class=""on""", "")
         Dim sb As New StringBuilder
 
         sb.AppendLine("<div class=""doc-global"">")
-        sb.AppendLine($"<a{onAttr} href=""{base}{entry.Url}"">(global)</a>")
-        sb.AppendLine($"<span class=""count"">{Site.TypeCountOf("")}</span>")
+
+        If String.IsNullOrEmpty(entry.url) Then
+            sb.AppendLine($"<span class=""doc-node"">(global)</span>")
+        Else
+            sb.AppendLine($"<a{onAttr} href=""{BaseUrl(currentUrl)}{entry.url}"">(global)</a>")
+        End If
+
+        sb.AppendLine($"<span class=""count"">{Index.TypeCountOf("")}</span>")
         sb.AppendLine("</div>")
 
-        Return sb.ToString
+        Return sb.ToString()
     End Function
 
     ''' <summary>
@@ -385,14 +440,12 @@ Public Class DocSiteContext
     ''' is rendered as a disabled group label.
     ''' </summary>
     ''' <param name="node"></param>
-    ''' <param name="pageUrl"></param>
-    ''' <param name="base"></param>
+    ''' <param name="currentUrl"></param>
     ''' <param name="activeNs"></param>
     ''' <returns></returns>
-    Private Function RenderNamespaceNode(node As FileSystemTree, pageUrl As String, base As String, activeNs As String) As String
-        Dim fullName$ = ApiDocSite.NodeFullName(node)
-        Dim entry As DocNamespaceEntry = Nothing
-        Dim hasEntry As Boolean = Site.NamespaceByName.TryGetValue(fullName, entry)
+    Private Function RenderNamespaceNode(node As FileSystemTree, currentUrl As String, activeNs As String) As String
+        Dim fullName$ = DocNaming.NodeFullName(node)
+        Dim entry As ApiDocNamespace = If(Index, Nothing)?.FindNamespace(fullName)
         Dim children = node.Files
         Dim hasChildren As Boolean = children IsNot Nothing AndAlso children.Count > 0
         Dim isActive As Boolean = String.Equals(fullName, activeNs, StringComparison.Ordinal)
@@ -403,16 +456,16 @@ Public Class DocSiteContext
         sb.AppendLine($"<details class=""doc-ns{(If(isActive, " active", ""))}{(If(isLeaf, " leaf", ""))}""{(If(isExpanded, " open", ""))}{(If(isExpanded, " data-default=""1""", ""))}>")
         sb.AppendLine("<summary>")
 
-        If hasEntry Then
-            Dim onAttr$ = If(String.Equals(entry.Url, pageUrl, StringComparison.OrdinalIgnoreCase), " class=""on""", "")
-            sb.AppendLine($"<a{onAttr} href=""{base}{entry.Url}"" title=""{DocHtml.Attr(fullName)}"">{DocHtml.Escape(node.Name)}</a>")
+        If entry IsNot Nothing AndAlso Not String.IsNullOrEmpty(entry.url) Then
+            Dim onAttr$ = If(String.Equals(entry.url, currentUrl, StringComparison.OrdinalIgnoreCase), " class=""on""", "")
+            sb.AppendLine($"<a{onAttr} href=""{BaseUrl(currentUrl)}{entry.url}"" title=""{DocHtml.Attr(fullName)}"">{DocHtml.Escape(node.Name)}</a>")
         Else
             sb.AppendLine($"<span class=""doc-node"" title=""{DocHtml.Attr(fullName)}"">{DocHtml.Escape(node.Name)}</span>")
         End If
 
         ' the count badge is the total type count of this namespace and all of its
         ' descendant namespaces
-        Dim typeCount As Integer = Site.TypeCountOf(fullName)
+        Dim typeCount As Integer = Index.TypeCountOf(fullName)
 
         If typeCount > 0 Then
             sb.AppendLine($"<span class=""count"">{typeCount}</span>")
@@ -423,15 +476,19 @@ Public Class DocSiteContext
         ' the types of the current namespace are listed as the leaf nodes, the
         ' other namespaces only list their child namespaces to keep the sidebar
         ' narrow enough.
-        If isActive AndAlso hasEntry AndAlso entry.Types.Count > 0 Then
-            sb.AppendLine("<ul class=""doc-types"">")
+        If isActive AndAlso entry IsNot Nothing Then
+            Dim types As List(Of ApiDocType) = Index.TypesOf(fullName).ToList
 
-            For Each t As DocTypeEntry In entry.Types
-                Dim onAttr$ = If(String.Equals(t.Url, pageUrl, StringComparison.OrdinalIgnoreCase), " class=""on""", "")
-                sb.AppendLine($"<li><a{onAttr} href=""{base}{t.Url}"">{DocHtml.Escape(DocHtml.DisplayTypeName(t.Name))}</a></li>")
-            Next
+            If types.Count > 0 Then
+                sb.AppendLine("<ul class=""doc-types"">")
 
-            sb.AppendLine("</ul>")
+                For Each t As ApiDocType In types
+                    Dim onAttr$ = If(String.Equals(t.url, currentUrl, StringComparison.OrdinalIgnoreCase), " class=""on""", "")
+                    sb.AppendLine($"<li><a{onAttr} href=""{BaseUrl(currentUrl)}{t.url}"">{DocHtml.Escape(DocHtml.DisplayTypeName(t.name))}</a></li>")
+                Next
+
+                sb.AppendLine("</ul>")
+            End If
         End If
 
         If hasChildren Then
@@ -439,7 +496,7 @@ Public Class DocSiteContext
 
             For Each child As FileSystemTree In children.Values.OrderBy(Function(n) n.Name)
                 sb.AppendLine("<li>")
-                sb.AppendLine(RenderNamespaceNode(child, pageUrl, base, activeNs))
+                sb.AppendLine(RenderNamespaceNode(child, currentUrl, activeNs))
                 sb.AppendLine("</li>")
             Next
 
@@ -448,7 +505,7 @@ Public Class DocSiteContext
 
         sb.AppendLine("</details>")
 
-        Return sb.ToString
+        Return sb.ToString()
     End Function
 
     ''' <summary>
@@ -472,19 +529,19 @@ Public Class DocSiteContext
     ''' <param name="pageUrl"></param>
     ''' <returns></returns>
     Public Function ActiveNamespace(pageUrl As String) As String
-        If String.IsNullOrEmpty(pageUrl) Then
+        If String.IsNullOrEmpty(pageUrl) OrElse Index Is Nothing Then
             Return Nothing
         End If
 
-        For Each ns As DocNamespaceEntry In Site.Namespaces
-            If String.Equals(ns.Url, pageUrl, StringComparison.OrdinalIgnoreCase) Then
-                Return ns.Name
+        For Each ns As ApiDocNamespace In Index.Document.namespaces
+            If String.Equals(ns.url, pageUrl, StringComparison.OrdinalIgnoreCase) Then
+                Return ns.name
             End If
         Next
 
-        For Each t As DocTypeEntry In Site.Types
-            If String.Equals(t.Url, pageUrl, StringComparison.OrdinalIgnoreCase) Then
-                Return t.ContainingNamespace.Name
+        For Each t As ApiDocType In Index.Document.types
+            If String.Equals(t.url, pageUrl, StringComparison.OrdinalIgnoreCase) Then
+                Return t.namespaceName
             End If
         Next
 

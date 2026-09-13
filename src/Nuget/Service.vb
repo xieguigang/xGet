@@ -472,6 +472,7 @@ Public Class Service
             Call registerStaticFiles(pkg)
             Call indexPackage(pkg, metadata)
             Call refreshStatistics()
+            Call indexApiDocs(pkg)
 
             Call writeResult(res, True, $"published {pkg.package_id} {pkg.version}", New Dictionary(Of String, Object) From {
                 {"id", pkg.package_id},
@@ -649,6 +650,7 @@ Public Class Service
             {"published", isoDate(latest.published)},
             {"iconUrl", If(String.IsNullOrEmpty(iconFile), "", $"{baseUrl}/api/icon/{Uri.EscapeDataString(latest.package_id)}")},
             {"readme", readmeInfo(baseUrl, latest)},
+            {"docs", docsInfo(latest)},
             {"cluster", clusterInfo(latest.package_id)},
             {"metadata", metadataJson},
             {"dependencies", dependencies},
@@ -683,6 +685,37 @@ Public Class Service
             {"format", extension},
             {"markdown", extension = "md" OrElse extension = "markdown"},
             {"url", $"{baseUrl}/api/readme/{Uri.EscapeDataString(idLower)}/{Uri.EscapeDataString(versionLower)}"}
+        }
+    End Function
+
+    ''' <summary>
+    ''' describe the api document of one package version for the web front end:
+    ''' the link to the per package api document index page. When the selected
+    ''' version ships no document, the latest version which has one is linked
+    ''' instead.
+    ''' </summary>
+    ''' <param name="pkg"></param>
+    ''' <returns></returns>
+    Private Function docsInfo(pkg As PackageRecord) As Dictionary(Of String, Object)
+        Dim version As String = pkg.version
+
+        If Not store.HasPackageApiDocs(pkg.package_id, version) Then
+            Dim versions As List(Of String) = store.GetPackageApiDocVersions(pkg.package_id)
+
+            If versions.Count = 0 Then
+                Return New Dictionary(Of String, Object) From {{"available", False}}
+            End If
+
+            version = versions.Last()
+        End If
+
+        Dim types As List(Of PackageApiDocRecord) = store.ReadPackageApiDocIndex(pkg.package_id, version)
+
+        Return New Dictionary(Of String, Object) From {
+            {"available", True},
+            {"version", version},
+            {"typeCount", types.Count},
+            {"url", ApiDocPages.PackageIndexUrl(pkg.package_id, version)}
         }
     End Function
 
@@ -1097,6 +1130,78 @@ Public Class Service
 
 #End Region
 
+#Region "api document pages (server side rendered, pseudo static)"
+
+    ''' <summary>
+    ''' the global cross package api document index page.
+    ''' </summary>
+    <HttpGet("/docs")>
+    Public Sub ApiDocGlobal(req As HttpRequest, res As HttpResponse)
+        Call writeDocumentPage(res, Function() ApiDocPages.RenderGlobalIndex(store, config))
+    End Sub
+
+    ''' <summary>
+    ''' the global cross package api document index page.
+    ''' </summary>
+    <HttpGet("/docs/index.html")>
+    Public Sub ApiDocGlobalIndex(req As HttpRequest, res As HttpResponse)
+        Call writeDocumentPage(res, Function() ApiDocPages.RenderGlobalIndex(store, config))
+    End Sub
+
+    ''' <summary>
+    ''' the per package api document index page (``.../index.html``) and the type
+    ''' content page (``.../&lt;type full name&gt;.html``).
+    ''' </summary>
+    <HttpGet("/docs/{id}/{version}/{name}.html")>
+    Public Sub ApiDocPage(req As HttpRequest, res As HttpResponse)
+        Dim id As String = routeValue(req, "id")
+        Dim version As String = routeValue(req, "version")
+        Dim name As String = Uri.UnescapeDataString(routeValue(req, "name"))
+        Dim html As String
+
+        If name.Equals("index", StringComparison.OrdinalIgnoreCase) Then
+            html = ApiDocPages.RenderPackageIndex(store, config, id, version)
+        Else
+            html = ApiDocPages.RenderTypePage(store, config, id, version, name)
+        End If
+
+        If String.IsNullOrEmpty(html) Then
+            res.WriteError(HTTP_RFC.RFC_NOT_FOUND, $"the api document was not found: {id} {version} {name}")
+            Return
+        End If
+
+        Call writeHtml(res, html)
+    End Sub
+
+    ''' <summary>
+    ''' render a document page and answer 404 when the renderer returns nothing.
+    ''' </summary>
+    ''' <param name="res"></param>
+    ''' <param name="render"></param>
+    Private Sub writeDocumentPage(res As HttpResponse, render As Func(Of String))
+        Dim html As String = render()
+
+        If String.IsNullOrEmpty(html) Then
+            res.WriteError(HTTP_RFC.RFC_NOT_FOUND, "the requested api document page was not found")
+        Else
+            Call writeHtml(res, html)
+        End If
+    End Sub
+
+    ''' <summary>
+    ''' write an utf-8 html response body.
+    ''' </summary>
+    ''' <param name="res"></param>
+    ''' <param name="html"></param>
+    Private Shared Sub writeHtml(res As HttpResponse, html As String)
+        Dim bytes As Byte() = Encoding.UTF8.GetBytes(html)
+
+        res.WriteHeader("text/html; charset=utf-8", bytes.Length)
+        Call res.SendData(bytes)
+    End Sub
+
+#End Region
+
 #Region "helpers"
 
     Private Function versionDirectory(pkg As PackageRecord) As String
@@ -1191,6 +1296,34 @@ Public Class Service
         End If
 
         Call store.ReplacePackageMetadata(pkg.package_id, pkg.version, values)
+    End Sub
+
+    ''' <summary>
+    ''' extract the api comment documents of a freshly published package and
+    ''' persist them into the document table. The extraction is best effort: any
+    ''' failure is only logged as a warning, so that a package could still be
+    ''' published even when its documentation could not be parsed.
+    ''' </summary>
+    ''' <param name="pkg">the published package version.</param>
+    Private Sub indexApiDocs(pkg As PackageRecord)
+        Try
+            Dim warnings As New List(Of String)
+            Dim records As List(Of PackageApiDocRecord) = PackageApiDocs.Extract(
+                nupkgFilePath(pkg), pkg.package_id, pkg.version, warnings)
+
+            Call store.ReplacePackageApiDocs(pkg.package_id, pkg.version, records)
+
+            For Each message As String In warnings
+                Call $"api document {pkg.package_id} {pkg.version}: {message}".warning()
+            Next
+
+            If records.Count > 0 Then
+                Call $"api documents extracted: {pkg.package_id} {pkg.version} -> {records.Count} type(s)".debug()
+            End If
+        Catch ex As Exception
+            Call $"api document extraction failed for {pkg.package_id} {pkg.version}: {ex.Message}".warning()
+            Call App.LogException(ex)
+        End Try
     End Sub
 
     Private Function getBaseUrl(req As HttpRequest) As String

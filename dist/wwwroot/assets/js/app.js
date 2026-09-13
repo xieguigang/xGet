@@ -516,6 +516,36 @@
             Number(cluster.y || 0).toFixed(3) + ', ' + Number(cluster.z || 0).toFixed(3);
     }
 
+    /* ----------------------------- api documentation link ----------------------------- */
+
+    /* the package detail page links to the server side rendered api document index
+       page of the package; the link is hidden when the package ships no document. */
+    function renderDocsLink(pkg) {
+        var row = $('pkg-docs-row');
+        if (!row) {
+            return;
+        }
+
+        var docs = pkg.docs || {};
+
+        if (!docs.available || !docs.url) {
+            row.hidden = true;
+            return;
+        }
+
+        var link = $('pkg-docs-link');
+        if (link) {
+            link.href = docs.url;
+            link.textContent = 'browse the api documentation';
+        }
+
+        var count = Number(docs.typeCount || 0);
+        setText('pkg-docs-meta', count + ' type' + (count === 1 ? '' : 's') +
+            (docs.version ? ' · version ' + docs.version : ''));
+
+        row.hidden = false;
+    }
+
     /* ----------------------------- package list ----------------------------- */
 
     function loadPackages() {
@@ -652,6 +682,7 @@
         setText('pkg-versions', formatNumber((pkg.versions || []).length));
         setText('pkg-published', formatDate(pkg.published));
         renderClusterLabel(pkg.cluster);
+        renderDocsLink(pkg);
 
         var titleNode = $('pkg-headline');
         if (titleNode) {

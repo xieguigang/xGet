@@ -36,6 +36,14 @@ Public Class NugetConfiguration
     Public ReadOnly Property Wwwroot As String
 
     ''' <summary>
+    ''' the directory that holds the replaceable html template files which are
+    ''' used by the server side rendered api document pages. configuration key
+    ''' ``template``, default is the ``template`` folder next to the ``wwwroot``
+    ''' folder.
+    ''' </summary>
+    Public ReadOnly Property TemplateDirectory As String
+
+    ''' <summary>
     ''' an optional public base url that overrides the request host, for example
     ''' ``http://pkg.example.com`` when the server runs behind a reverse proxy.
     ''' </summary>
@@ -76,7 +84,7 @@ Public Class NugetConfiguration
     Public Const DefaultClusterMinSamples As Integer = 3
     Public Const DefaultClusterNeighbors As Integer = 15
 
-    Private Sub New(data As String, packages As String, database As String, wwwroot As String, baseUrl As String,
+    Private Sub New(data As String, packages As String, database As String, wwwroot As String, template As String, baseUrl As String,
                     clusterEnabled As Boolean, clusterK As Integer, clusterIntervalMinutes As Integer,
                     clusterMinSamples As Integer, clusterNeighbors As Integer)
 
@@ -84,6 +92,7 @@ Public Class NugetConfiguration
         Me.PackageDirectory = packages
         Me.DatabaseDirectory = database
         Me.Wwwroot = wwwroot
+        Me.TemplateDirectory = template
         Me.BaseUrl = baseUrl
         Me.ClusterEnabled = clusterEnabled
         Me.ClusterK = clusterK
@@ -119,9 +128,18 @@ Public Class NugetConfiguration
 
         Dim wwwroot As String = getValue(config, "wwwroot")
         Dim baseUrl As String = getValue(config, "base-url")
+        Dim template As String = getValue(config, "template")
+
+        If String.IsNullOrEmpty(template) Then
+            If Not String.IsNullOrEmpty(wwwroot) Then
+                template = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(wwwroot)), "template")
+            Else
+                template = Path.Combine(Directory.GetCurrentDirectory(), "template")
+            End If
+        End If
 
         Return New NugetConfiguration(
-            data, packages, database, wwwroot, baseUrl,
+            data, packages, database, wwwroot, template, baseUrl,
             boolValue(config, "cluster-enabled", True),
             intValue(config, "cluster-k", DefaultClusterK, 2, 64),
             intValue(config, "cluster-interval", DefaultClusterIntervalMinutes, 1, 1440),
