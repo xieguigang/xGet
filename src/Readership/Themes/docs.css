@@ -7,11 +7,12 @@
 
 .doc-shell {
     display: grid;
-    grid-template-columns: 300px minmax(0, 1fr);
+    grid-template-columns: 250px minmax(0, 1fr);
     align-items: start;
-    max-width: 1360px;
+    width: 90%;
+    max-width: none;
     margin: 0 auto;
-    padding: 0 3.4vw;
+    padding: 0;
 }
 
 .doc-side {
@@ -50,17 +51,22 @@
 }
 
 .doc-ns {
-    margin: 2px 0;
+    margin: 0;
 }
 
 .doc-ns > summary {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 6px 8px;
+    gap: 6px;
+    padding: 5px 6px;
     list-style: none;
     cursor: pointer;
     border-radius: 2px;
+    transition: background .2s var(--ease);
+}
+
+.doc-ns > summary:hover {
+    background: var(--panel-2);
 }
 
 .doc-ns > summary::-webkit-details-marker {
@@ -70,19 +76,32 @@
 .doc-ns > summary::before {
     content: "▸";
     flex: none;
+    width: 10px;
     color: var(--ink-ghost);
     font-size: 10px;
-    transition: transform .2s var(--ease);
+    text-align: center;
+    transition: transform .2s var(--ease), color .2s var(--ease);
 }
 
 .doc-ns[open] > summary::before {
     transform: rotate(90deg);
 }
 
+/* a leaf node which owns no child namespace has nothing to expand */
+.doc-ns.leaf > summary::before {
+    content: "·";
+    transform: none;
+}
+
+.doc-ns.leaf > summary {
+    cursor: default;
+}
+
 .doc-ns > summary a {
     color: var(--ink-dim);
     font-size: 12.5px;
-    word-break: break-all;
+    overflow-wrap: anywhere;
+    transition: color .2s var(--ease);
 }
 
 .doc-ns > summary a:hover,
@@ -90,31 +109,62 @@
     color: var(--green);
 }
 
+.doc-ns.active > summary a,
+.doc-ns.active > summary .doc-node {
+    color: var(--ink);
+}
+
+/* a namespace segment which has no own page: a disabled group label */
+.doc-ns > summary .doc-node {
+    color: var(--ink-faint);
+    font-size: 12.5px;
+    overflow-wrap: anywhere;
+}
+
 .doc-ns > summary .count {
     flex: none;
     margin-left: auto;
+    padding-left: 6px;
     color: var(--ink-ghost);
     font-size: 10px;
     font-variant-numeric: tabular-nums;
 }
 
+/* ===================== namespace tree ===================== */
+
+.doc-children {
+    margin: 0;
+    padding: 0 0 0 11px;
+    list-style: none;
+    border-left: 1px solid var(--hairline2);
+}
+
+.doc-children > li {
+    margin: 0;
+}
+
+.doc-children.doc-root {
+    padding-left: 0;
+    border-left: 0;
+}
+
 .doc-types {
-    margin: 0 0 4px;
-    padding: 0 0 0 18px;
+    margin: 1px 0 4px;
+    padding: 0 0 0 11px;
     list-style: none;
     border-left: 1px solid var(--hairline2);
 }
 
 .doc-types li {
-    margin: 1px 0;
+    margin: 0;
 }
 
 .doc-types a {
     display: block;
-    padding: 4px 8px;
+    padding: 4px 6px;
     color: var(--ink-faint);
-    font-size: 12px;
-    word-break: break-all;
+    font-size: 11.5px;
+    overflow-wrap: anywhere;
     border-radius: 2px;
     transition: color .2s var(--ease), background .2s var(--ease);
 }
@@ -125,10 +175,43 @@
 }
 
 .doc-types a.on {
-    margin-left: -19px;
-    padding-left: 17px;
     color: var(--ink);
-    border-left: 2px solid var(--green);
+    background: var(--panel-3);
+    box-shadow: inset 2px 0 0 var(--green);
+}
+
+/* ---- the global namespace node ---- */
+
+.doc-global {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 2px;
+    padding: 5px 6px;
+    border-radius: 2px;
+    transition: background .2s var(--ease);
+}
+
+.doc-global:hover {
+    background: var(--panel-2);
+}
+
+.doc-global a {
+    color: var(--ink-dim);
+    font-size: 12.5px;
+}
+
+.doc-global a:hover,
+.doc-global a.on {
+    color: var(--green);
+}
+
+.doc-global .count {
+    margin-left: auto;
+    padding-left: 6px;
+    color: var(--ink-ghost);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
 }
 
 .doc-main {
@@ -476,7 +559,8 @@ a.cref:hover {
 @media (max-width: 1000px) {
     .doc-shell {
         display: block;
-        padding: 0 4vw;
+        width: 92%;
+        padding: 0;
     }
 
     .doc-side {

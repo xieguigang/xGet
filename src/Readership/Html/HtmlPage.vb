@@ -1,5 +1,6 @@
 Imports System.Text
 Imports System.Text.RegularExpressions
+Imports Microsoft.VisualBasic.ApplicationServices
 
 ''' <summary>
 ''' The low level html helpers of the api reference document site.
@@ -147,6 +148,53 @@ Public Class DocSiteContext
     End Function
 
     ''' <summary>
+    ''' build the namespace breadcrumb which is split by the namespace segments.
+    ''' every segment links to its namespace page when that namespace exists in
+    ''' the current document site, otherwise it is rendered as a plain text.
+    ''' </summary>
+    ''' <param name="namespaceName"></param>
+    ''' <param name="pageUrl"></param>
+    ''' <param name="lastIsText">renders the last segment as the current page text</param>
+    ''' <returns></returns>
+    Public Function NamespaceBreadcrumb(namespaceName As String, pageUrl As String, Optional lastIsText As Boolean = False) As String
+        Dim base$ = BaseUrl(pageUrl)
+        Dim sb As New StringBuilder
+
+        sb.Append($"<a href=""{base}index.html"">Overview</a>")
+
+        If String.IsNullOrWhiteSpace(namespaceName) Then
+            sb.Append($" / <span class=""crumb{(If(lastIsText, " on", ""))}"">(global)</span>")
+            Return sb.ToString
+        End If
+
+        Dim segments = namespaceName _
+            .Split("."c) _
+            .Where(Function(s) s.Length > 0) _
+            .ToArray
+        Dim path$ = ""
+
+        For i As Integer = 0 To segments.Length - 1
+            Dim segment$ = segments(i)
+            path = If(path.Length = 0, segment, path & "." & segment)
+
+            If lastIsText AndAlso i = segments.Length - 1 Then
+                sb.Append($" / <span class=""crumb on"">{DocHtml.Escape(segment)}</span>")
+                Continue For
+            End If
+
+            Dim entry As DocNamespaceEntry = Nothing
+
+            If Site.NamespaceByName.TryGetValue(path, entry) Then
+                sb.Append($" / <a href=""{base}{entry.Url}"">{DocHtml.Escape(segment)}</a>")
+            Else
+                sb.Append($" / <span class=""crumb"">{DocHtml.Escape(segment)}</span>")
+            End If
+        Next
+
+        Return sb.ToString
+    End Function
+
+    ''' <summary>
     ''' render the whole html page with the shared header, sidebar tree and footer
     ''' </summary>
     ''' <param name="pageUrl">the site relative url of the current page</param>
@@ -217,48 +265,149 @@ Public Class DocSiteContext
     End Function
 
     ''' <summary>
-    ''' build the sidebar navigation tree. the types of the active namespace are
-    ''' always expanded, the other namespaces are expanded only when the whole
-    ''' document site is small enough.
+    ''' build the sidebar navigation tree from the namespace tree. every node
+    ''' only displays its own segment name, and the ancestor chain of the
+    ''' namespace that the current page belongs to is expanded automatically.
     ''' </summary>
     ''' <param name="pageUrl"></param>
     ''' <returns></returns>
     Public Function Sidebar(pageUrl As String) As String
         Dim base$ = BaseUrl(pageUrl)
         Dim activeNs$ = ActiveNamespace(pageUrl)
-        Dim includeAllTypes As Boolean = Site.Types.Count <= 600
+        Dim tree As FileSystemTree = Site.NamespaceTree
         Dim sb As New StringBuilder
 
         sb.AppendLine("<div class=""doc-side-head"">")
         sb.AppendLine("<input id=""doc-filter"" class=""doc-filter"" type=""search"" placeholder=""filter…"" autocomplete=""off"" />")
         sb.AppendLine("</div>")
-        sb.AppendLine("<nav class=""doc-tree"">")
+        sb.AppendLine("<nav class=""doc-tree"" id=""doc-tree"">")
 
-        For Each ns As DocNamespaceEntry In Site.Namespaces
-            Dim isActive As Boolean = String.Equals(ns.Name, activeNs, StringComparison.Ordinal)
-            Dim isOn As Boolean = String.Equals(ns.Url, pageUrl, StringComparison.OrdinalIgnoreCase)
-            Dim open As Boolean = isActive OrElse includeAllTypes
+        If tree Is Nothing OrElse tree.Files Is Nothing OrElse tree.Files.Count = 0 Then
+            sb.AppendLine(SidebarGlobal(pageUrl, base))
+        Else
+            sb.AppendLine(SidebarGlobal(pageUrl, base))
+            sb.AppendLine("<ul class=""doc-children doc-root"">")
 
-            sb.AppendLine($"<details class=""doc-ns""{(If(open, " open", ""))}>")
-            sb.AppendLine($"<summary><a class=""{(If(isOn, "on", ""))}"" href=""{base}{ns.Url}"">{DocHtml.Escape(DisplayNamespace(ns.Name))}</a><span class=""count"">{ns.Types.Count}</span></summary>")
+            For Each node As FileSystemTree In tree.Files.Values.OrderBy(Function(n) n.Name)
+                sb.AppendLine("<li>")
+                sb.AppendLine(RenderNamespaceNode(node, pageUrl, base, activeNs))
+                sb.AppendLine("</li>")
+            Next
 
-            If open Then
-                sb.AppendLine("<ul class=""doc-types"">")
-
-                For Each t As DocTypeEntry In ns.Types
-                    Dim onAttr As String = If(String.Equals(t.Url, pageUrl, StringComparison.OrdinalIgnoreCase), " class=""on""", "")
-                    sb.AppendLine($"<li><a{onAttr} href=""{base}{t.Url}"">{DocHtml.Escape(DocHtml.DisplayTypeName(t.Name))}</a></li>")
-                Next
-
-                sb.AppendLine("</ul>")
-            End If
-
-            sb.AppendLine("</details>")
-        Next
+            sb.AppendLine("</ul>")
+        End If
 
         sb.AppendLine("</nav>")
 
         Return sb.ToString
+    End Function
+
+    ''' <summary>
+    ''' render the global namespace (the namespace name is empty) as the first
+    ''' level node of the sidebar tree
+    ''' </summary>
+    ''' <param name="pageUrl"></param>
+    ''' <param name="base"></param>
+    ''' <returns></returns>
+    Private Function SidebarGlobal(pageUrl As String, base As String) As String
+        Dim entry As DocNamespaceEntry = Nothing
+
+        If Not Site.NamespaceByName.TryGetValue("", entry) Then
+            Return ""
+        End If
+
+        Dim onAttr$ = If(String.Equals(entry.Url, pageUrl, StringComparison.OrdinalIgnoreCase), " class=""on""", "")
+        Dim sb As New StringBuilder
+
+        sb.AppendLine("<div class=""doc-global"">")
+        sb.AppendLine($"<a{onAttr} href=""{base}{entry.Url}"">(global)</a>")
+        sb.AppendLine($"<span class=""count"">{entry.Types.Count}</span>")
+        sb.AppendLine("</div>")
+
+        Return sb.ToString
+    End Function
+
+    ''' <summary>
+    ''' recursively render one node of the namespace tree. the node is rendered
+    ''' as a link when it is a real namespace of the document site, otherwise it
+    ''' is rendered as a disabled group label.
+    ''' </summary>
+    ''' <param name="node"></param>
+    ''' <param name="pageUrl"></param>
+    ''' <param name="base"></param>
+    ''' <param name="activeNs"></param>
+    ''' <returns></returns>
+    Private Function RenderNamespaceNode(node As FileSystemTree, pageUrl As String, base As String, activeNs As String) As String
+        Dim fullName$ = ApiDocSite.NodeFullName(node)
+        Dim entry As DocNamespaceEntry = Nothing
+        Dim hasEntry As Boolean = Site.NamespaceByName.TryGetValue(fullName, entry)
+        Dim children = node.Files
+        Dim hasChildren As Boolean = children IsNot Nothing AndAlso children.Count > 0
+        Dim isActive As Boolean = String.Equals(fullName, activeNs, StringComparison.Ordinal)
+        Dim isExpanded As Boolean = isActive OrElse (hasChildren AndAlso isAncestor(activeNs, fullName))
+        Dim isLeaf As Boolean = Not hasChildren AndAlso Not isActive
+        Dim sb As New StringBuilder
+
+        sb.AppendLine($"<details class=""doc-ns{(If(isActive, " active", ""))}{(If(isLeaf, " leaf", ""))}""{(If(isExpanded, " open", ""))}{(If(isExpanded, " data-default=""1""", ""))}>")
+        sb.AppendLine("<summary>")
+
+        If hasEntry Then
+            Dim onAttr$ = If(String.Equals(entry.Url, pageUrl, StringComparison.OrdinalIgnoreCase), " class=""on""", "")
+            sb.AppendLine($"<a{onAttr} href=""{base}{entry.Url}"" title=""{DocHtml.Attr(fullName)}"">{DocHtml.Escape(node.Name)}</a>")
+        Else
+            sb.AppendLine($"<span class=""doc-node"" title=""{DocHtml.Attr(fullName)}"">{DocHtml.Escape(node.Name)}</span>")
+        End If
+
+        If hasEntry AndAlso entry.Types.Count > 0 Then
+            sb.AppendLine($"<span class=""count"">{entry.Types.Count}</span>")
+        End If
+
+        sb.AppendLine("</summary>")
+
+        ' the types of the current namespace are listed as the leaf nodes, the
+        ' other namespaces only list their child namespaces to keep the sidebar
+        ' narrow enough.
+        If isActive AndAlso hasEntry AndAlso entry.Types.Count > 0 Then
+            sb.AppendLine("<ul class=""doc-types"">")
+
+            For Each t As DocTypeEntry In entry.Types
+                Dim onAttr$ = If(String.Equals(t.Url, pageUrl, StringComparison.OrdinalIgnoreCase), " class=""on""", "")
+                sb.AppendLine($"<li><a{onAttr} href=""{base}{t.Url}"">{DocHtml.Escape(DocHtml.DisplayTypeName(t.Name))}</a></li>")
+            Next
+
+            sb.AppendLine("</ul>")
+        End If
+
+        If hasChildren Then
+            sb.AppendLine("<ul class=""doc-children"">")
+
+            For Each child As FileSystemTree In children.Values.OrderBy(Function(n) n.Name)
+                sb.AppendLine("<li>")
+                sb.AppendLine(RenderNamespaceNode(child, pageUrl, base, activeNs))
+                sb.AppendLine("</li>")
+            Next
+
+            sb.AppendLine("</ul>")
+        End If
+
+        sb.AppendLine("</details>")
+
+        Return sb.ToString
+    End Function
+
+    ''' <summary>
+    ''' is the given <paramref name="nodeName"/> an ancestor namespace of the
+    ''' <paramref name="activeNs"/> namespace
+    ''' </summary>
+    ''' <param name="activeNs"></param>
+    ''' <param name="nodeName"></param>
+    ''' <returns></returns>
+    Private Shared Function isAncestor(activeNs As String, nodeName As String) As Boolean
+        If String.IsNullOrEmpty(activeNs) OrElse String.IsNullOrEmpty(nodeName) Then
+            Return False
+        End If
+
+        Return activeNs.StartsWith(nodeName & ".", StringComparison.Ordinal)
     End Function
 
     ''' <summary>

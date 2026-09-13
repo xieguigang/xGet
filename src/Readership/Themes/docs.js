@@ -1,8 +1,9 @@
 /* =====================================================================
    docs.js — api reference document interactions
-   + sidebar filter
+   + namespace tree filter (recursive match + auto expand)
    + index page namespace filter
-   + keep the active type visible in the sidebar
+   + keep the active namespace / type visible in the sidebar
+   + smooth jump for the in page anchors
    ===================================================================== */
 
 (function () {
@@ -20,41 +21,126 @@
         return el ? (el.textContent || '').toLowerCase() : '';
     }
 
+    function forEach(list, fn) {
+        Array.prototype.forEach.call(list, fn);
+    }
+
     onReady(function () {
 
-        /* ---- sidebar filter ---- */
+        var tree = document.getElementById('doc-tree');
+
+        /* ---- namespace tree filter ---- */
+
+        function restoreDefaultOpen() {
+            if (!tree) {
+                return;
+            }
+
+            forEach(tree.querySelectorAll('.doc-ns'), function (ns) {
+                ns.open = ns.getAttribute('data-default') === '1';
+            });
+        }
+
+        function resetFilter() {
+            if (!tree) {
+                return;
+            }
+
+            forEach(tree.querySelectorAll('.doc-ns'), function (ns) {
+                ns.style.display = '';
+                ns.removeAttribute('data-hit');
+            });
+
+            forEach(tree.querySelectorAll('.doc-types li'), function (li) {
+                li.style.display = '';
+            });
+
+            var global = tree.querySelector('.doc-global');
+
+            if (global) {
+                global.style.display = '';
+            }
+
+            restoreDefaultOpen();
+        }
+
+        function applyFilter(q) {
+            if (!tree) {
+                return;
+            }
+
+            if (!q) {
+                resetFilter();
+                return;
+            }
+
+            var nodes = Array.prototype.slice.call(tree.querySelectorAll('.doc-ns'));
+
+            forEach(nodes, function (ns) {
+                ns.removeAttribute('data-hit');
+            });
+
+            /* mark the matched nodes bottom-up: a node hits when its own label,
+               one of its types, or any of its descendant nodes hits. */
+            for (var i = nodes.length - 1; i >= 0; i--) {
+                var ns = nodes[i];
+                var label = ns.querySelector('summary a, summary .doc-node');
+                var hit = text(label).indexOf(q) >= 0;
+
+                if (!hit) {
+                    var types = ns.querySelectorAll('.doc-types a');
+
+                    for (var k = 0; k < types.length; k++) {
+                        if (text(types[k]).indexOf(q) >= 0) {
+                            hit = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!hit && ns.querySelector('.doc-ns[data-hit="1"]')) {
+                    hit = true;
+                }
+
+                if (hit) {
+                    ns.setAttribute('data-hit', '1');
+                }
+            }
+
+            forEach(nodes, function (ns) {
+                var hit = ns.getAttribute('data-hit') === '1';
+
+                ns.style.display = hit ? '' : 'none';
+
+                if (hit) {
+                    ns.open = true;
+                }
+            });
+
+            /* hide the type leaves which do not match */
+            forEach(tree.querySelectorAll('.doc-types li'), function (li) {
+                var a = li.querySelector('a');
+
+                li.style.display = (a && text(a).indexOf(q) >= 0) ? '' : 'none';
+            });
+
+            var global = tree.querySelector('.doc-global');
+
+            if (global) {
+                global.style.display = text(global).indexOf(q) >= 0 ? '' : 'none';
+            }
+        }
+
         var filter = document.getElementById('doc-filter');
 
         if (filter) {
             filter.addEventListener('input', function () {
-                var q = filter.value.trim().toLowerCase();
-                var groups = document.querySelectorAll('.doc-tree .doc-ns');
-
-                Array.prototype.forEach.call(groups, function (ns) {
-                    var name = text(ns.querySelector('summary a'));
-                    var matched = !q || name.indexOf(q) >= 0;
-
-                    if (!matched && q) {
-                        var types = ns.querySelectorAll('.doc-types a');
-
-                        for (var i = 0; i < types.length; i++) {
-                            if (text(types[i]).indexOf(q) >= 0) {
-                                matched = true;
-                                break;
-                            }
-                        }
-                    }
-
-                    ns.style.display = matched ? '' : 'none';
-
-                    if (q && matched) {
-                        ns.open = true;
-                    }
-                });
+                applyFilter(filter.value.trim().toLowerCase());
             });
         }
 
         /* ---- index page namespace filter ---- */
+
         var indexFilter = document.getElementById('index-filter');
 
         if (indexFilter) {
@@ -87,25 +173,22 @@
             apply();
         }
 
-        /* ---- keep the active type visible ---- */
-        var active = document.querySelector('.doc-types a.on');
+        /* ---- keep the active tree node visible ---- */
 
-        if (active) {
-            var owner = active.closest('.doc-ns');
+        var side = document.querySelector('.doc-side');
 
-            if (owner) {
-                owner.open = true;
-            }
+        if (side) {
+            var activeNode = document.querySelector('.doc-ns.active > summary') ||
+                document.querySelector('.doc-types a.on');
 
-            var side = document.querySelector('.doc-side');
-
-            if (side && active.offsetTop > side.clientHeight) {
-                side.scrollTop = active.offsetTop - side.clientHeight / 2;
+            if (activeNode && activeNode.offsetTop > side.clientHeight) {
+                side.scrollTop = activeNode.offsetTop - side.clientHeight / 2;
             }
         }
 
         /* ---- smooth jump for the in page anchors ---- */
-        document.querySelectorAll('a[href^="#"]').forEach(function (a) {
+
+        forEach(document.querySelectorAll('a[href^="#"]'), function (a) {
             a.addEventListener('click', function (ev) {
                 var id = a.getAttribute('href').slice(1);
 
