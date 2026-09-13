@@ -14,6 +14,9 @@ Module Program
                 Case "serverdocs"
                     Environment.ExitCode = ServerDocsTest.Run(args.Skip(1).ToArray)
                     Return
+                Case "walcheck"
+                    Environment.ExitCode = WalCheckTest.Run(args.Skip(1).ToArray)
+                    Return
             End Select
         End If
 
