@@ -19,6 +19,26 @@
   </url>
   <url>
     <loc>http://localhost:8090/docs/index.html</loc>
-    <lastmod>2026-09-13T18:26:28Z</lastmod>
+    <lastmod>2026-09-13T18:36:30Z</lastmod>
+  </url>
+  <url>
+    <loc>http://localhost:8090/package.html?id=Demo.Widgets</loc>
+    <lastmod>2026-09-13T10:27:40Z</lastmod>
+  </url>
+  <url>
+    <loc>http://localhost:8090/docs/Demo.Widgets/1.2.3/index.html</loc>
+    <lastmod>2026-09-13T10:27:40Z</lastmod>
+  </url>
+  <url>
+    <loc>http://localhost:8090/docs/Demo.Widgets/1.2.3/Demo.Widgets.Engine.html</loc>
+    <lastmod>2026-09-13T10:27:40Z</lastmod>
+  </url>
+  <url>
+    <loc>http://localhost:8090/docs/Demo.Widgets/1.2.3/Demo.Widgets.WidgetKind.html</loc>
+    <lastmod>2026-09-13T10:27:40Z</lastmod>
+  </url>
+  <url>
+    <loc>http://localhost:8090/docs/Demo.Widgets/1.2.3/Demo.Widgets.WidgetServer.html</loc>
+    <lastmod>2026-09-13T10:27:40Z</lastmod>
   </url>
 </urlset>

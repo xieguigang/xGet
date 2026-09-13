@@ -120,6 +120,12 @@ Public Class SitemapScheduler
     ''' therefore not be generated.
     ''' </summary>
     Public Sub Start()
+        ' the activity clock is a shared field, and a shared field initializer
+        ' may legally be deferred until the first static access; call it here so
+        ' that the clock is always anchored at the service startup and the very
+        ' first schedule is not mistaken for a busy server.
+        Call TouchRequest()
+
         If Not config.SitemapEnabled Then
             Call "the sitemap generation is disabled by the configuration".info()
             Return
