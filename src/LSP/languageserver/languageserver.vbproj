@@ -6,6 +6,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <Platforms>AnyCPU;x64</Platforms>
     <StartupObject>languageserver.Program</StartupObject>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <OutputPath>../../../dist/bin</OutputPath>
   </PropertyGroup>
 
   <ItemGroup>
