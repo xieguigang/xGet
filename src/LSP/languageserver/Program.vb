@@ -2,9 +2,11 @@ Imports System
 Imports System.IO
 Imports System.Net
 Imports System.Net.Sockets
+Imports System.Text.Json
 Imports System.Threading
 Imports System.Threading.Tasks
 Imports Nuget
+Imports Readership
 
 ''' <summary>
 ''' entry point of the remote vb script language server. it parses the command
@@ -25,6 +27,15 @@ Module Program
     Private Const DefaultPort As Integer = 8080
 
     Sub Main(args As String())
+        ' temporary, test-only seeding hook: inserts a synthetic package so the
+        ' data path can be smoke tested, then exits. remove after testing.
+        If args.Contains("--seed-self") Then
+            Dim seedDir As String = (From a In args Where a <> "--seed-self" AndAlso Not a.StartsWith("-"c) Select a).FirstOrDefault()
+            If String.IsNullOrEmpty(seedDir) Then seedDir = "g:/tmp/lsptestdb"
+            SeedSelf(seedDir)
+            Environment.Exit(0)
+        End If
+
         Dim dataDir As String = Nothing
         Dim port As Integer = DefaultPort
 
