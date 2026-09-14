@@ -4,7 +4,9 @@ src/**
 tsconfig.json
 .gitignore
 **/tsconfig.json
-**/.eslintrc.json
-**/*.map
 **/*.ts
-node_modules/**
+**/*.map
+# keep node_modules: the extension needs vscode-languageclient at runtime.
+# (only dev-only tooling is excluded below)
+build.cmd
+package-lock.json
