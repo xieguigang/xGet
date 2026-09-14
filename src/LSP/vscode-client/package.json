@@ -1,0 +1,61 @@
+{
+  "name": "remote-vbnet-lsp",
+  "displayName": "Remote VB.NET LSP",
+  "description": "Connects to the VB.NET script language server over TCP to provide IntelliSense (completion, hover, signature help) for VB scripts.",
+  "version": "0.1.0",
+  "publisher": "xdoc",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:vbnet"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "vbnet",
+        "aliases": [
+          "VB.NET",
+          "vbnet"
+        ],
+        "extensions": [
+          ".vb",
+          ".vbs"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "configuration": {
+      "title": "Remote VB.NET LSP",
+      "properties": {
+        "myRemoteLsp.host": {
+          "type": "string",
+          "default": "127.0.0.1",
+          "description": "Host (IP / hostname) the VB.NET language server is listening on."
+        },
+        "myRemoteLsp.port": {
+          "type": "number",
+          "default": 8080,
+          "description": "Port the VB.NET language server is listening on."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.0"
+  }
+}
