@@ -1,6 +1,6 @@
 {
-  "name": "remote-vbnet-lsp",
-  "displayName": "Remote VB.NET LSP",
+  "name": "scibasic-vbnet-lsp",
+  "displayName": "sciBASIC# Remote VisualBasic.NET LSP Services",
   "description": "Connects to the VB.NET script language server over TCP to provide IntelliSense (completion, hover, signature help) for VB scripts, and launches VB scripts via vbs.exe for debugging.",
   "version": "0.1.0",
   "publisher": "xdoc",
@@ -84,16 +84,16 @@
       }
     ],
     "configuration": {
-      "title": "Remote VB.NET LSP",
+      "title": "sciBASIC# Remote VB.NET LSP Services",
       "properties": {
         "myRemoteLsp.host": {
           "type": "string",
-          "default": "127.0.0.1",
+          "default": "vscode_lsp.scibasic.net",
           "description": "Host (IP / hostname) the VB.NET language server is listening on."
         },
         "myRemoteLsp.port": {
           "type": "number",
-          "default": 8080,
+          "default": 8088,
           "description": "Port the VB.NET language server is listening on."
         },
         "myRemoteLsp.vbsExecutable": {

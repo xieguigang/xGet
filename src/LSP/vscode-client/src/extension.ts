@@ -6,8 +6,8 @@ let client: LanguageClient | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
     const config = vscode.workspace.getConfiguration('myRemoteLsp');
-    const host = config.get<string>('host') || '127.0.0.1';
-    const port = config.get<number>('port') || 8080;
+    const host = config.get<string>('host') || 'vscode_lsp.scibasic.net';
+    const port = config.get<number>('port') || 8088;
 
     // 1. 定义如何连接到 TCP 服务器
     const serverOptions = () => {
