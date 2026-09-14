@@ -5,6 +5,8 @@ Imports System.Net.Sockets
 Imports System.Threading
 Imports System.Threading.Tasks
 Imports Nuget
+Imports JSql.Storage
+Imports Microsoft.VisualBasic.Data.Repository
 
 ''' <summary>
 ''' entry point of the remote vb script language server. it parses the command
@@ -42,7 +44,15 @@ Module Program
 
         Dim store As NugetStore = Nothing
         Try
-            store = New NugetStore(dbDir)
+            ' open the database as a read only reader: SharedRead lets several
+            ' such processes hold the lock at once, and MultiProcessAccess makes
+            ' the lock released between statements so the running nuget server
+            ' (the exclusive writer) can interleave its writes with our reads.
+            Dim readerOptions As New StorageOptions With {
+                .MultiProcessAccess = True,
+                .LockMode = TextStoreLockMode.SharedRead
+            }
+            store = New NugetStore(dbDir, readerOptions)
         Catch ex As Exception
             Console.Error.WriteLine($"error: failed to open nuget database: {ex.Message}")
             Environment.Exit(1)

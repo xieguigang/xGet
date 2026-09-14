@@ -203,10 +203,14 @@ Public Class NugetConfiguration
     ''' </summary>
     ''' <returns></returns>
     Public Function CreateStorageOptions() As StorageOptions
+        ' allow the remote LSP (a read only reader) to access the same database
+        ' files concurrently; the lock is released between statements so the
+        ' reader can grab a SharedRead lock in between.
         Return New StorageOptions With {
             .MergeIdleSeconds = DbMergeIdleSeconds,
             .MergeAfterOperations = DbMergeOperations,
-            .FsyncEachWrite = False
+            .FsyncEachWrite = False,
+            .MultiProcessAccess = True
         }
     End Function
 
