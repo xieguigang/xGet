@@ -151,6 +151,8 @@ Module Program
         If files.Count = 0 Then
             Call Console.WriteLine($"no nuget packages were found in '{folder}'")
             Return 1
+        Else
+            files = New List(Of String)(files.OrderBy(Function(f) f.FileLength))
         End If
 
         Call Console.WriteLine($"found {files.Count} package(s) in '{folder}'" &
