@@ -271,3 +271,4 @@ about-trend.png
 /dist/tmp/sitemap.xml
 /dist/tmp/sitemap.state
 dist/nuget_server.err
+dist/lsp_server.err
