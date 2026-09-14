@@ -50,6 +50,14 @@ Public Class Service
     ''' </summary>
     Private sitemap As SitemapScheduler
 
+    ''' <summary>
+    ''' the cache life time of the static resources of the ``wwwroot`` folder:
+    ''' the scripts, the style sheets, the images and the pages of the web
+    ''' front end do not change between two releases, so the browser is told
+    ''' to reuse its local copy for a month instead of asking the server again.
+    ''' </summary>
+    Private Const StaticCacheSeconds As Integer = 30 * 24 * 60 * 60
+
     Public Sub Mount(router As HttpRouter, config As IReadOnlyDictionary(Of String, String)) Implements IHttpAppModule.Mount
         Me.router = router
         Me.config = NugetConfiguration.FromConfig(config)
@@ -65,6 +73,7 @@ Public Class Service
         Call $"nuget server data directory: {Me.config.DataDirectory}".info()
 
         Call registerStyleSheetMime()
+        Call enableStaticFileCache()
 
         If Me.config.ClusterEnabled Then
             ' the first run is delayed so that it does not compete with the
@@ -120,6 +129,29 @@ Public Class Service
         Catch ex As Exception
             Call $"the .xsl mime type could not be registered: {ex.Message}".warning()
         End Try
+    End Sub
+
+    ''' <summary>
+    ''' tell the browser that the static resources of the ``wwwroot`` folder
+    ''' (the scripts, the style sheets, the images, the style sheet of the
+    ''' site map and the html pages of the web front end) may be served from
+    ''' its own cache for a month. no extension filter is applied, so every
+    ''' static file of the site is covered.
+    ''' </summary>
+    ''' <remarks>
+    ''' the static files are served by the file system listener of the host
+    ''' before the clr routes are consulted, so the policy has to be applied
+    ''' on the listener itself; it is mounted before this module.
+    ''' </remarks>
+    Private Sub enableStaticFileCache()
+        If router Is Nothing OrElse router.FileSystem Is Nothing Then
+            Call "the static file cache is not enabled: no file system listener was mounted".warning()
+            Return
+        End If
+
+        router.FileSystem.CacheMaxAge = StaticCacheSeconds
+
+        Call $"static file cache enabled: {StaticCacheSeconds \ 86400} day(s) for the wwwroot resources".info()
     End Sub
 
     ''' <summary>
@@ -895,8 +927,7 @@ Public Class Service
         Dim bytes As Byte() = File.ReadAllBytes(readmePath)
 
         res.AccessControlAllowOrigin = "*"
-        res.WriteHeader(mime, bytes.Length)
-        Call res.SendData(bytes)
+        res.WriteContent(bytes, mime)
     End Sub
 
     Private Shared Function fieldValue(metadata As Dictionary(Of String, String), name As String) As String
@@ -1240,8 +1271,7 @@ Public Class Service
         Dim bytes As Byte() = Encoding.UTF8.GetBytes(xml)
 
         res.AccessControlAllowOrigin = "*"
-        res.WriteHeader("application/xml; charset=utf-8", bytes.Length)
-        Call res.SendData(bytes)
+        res.WriteContent(bytes, "application/xml; charset=utf-8")
     End Sub
 
     ''' <summary>
@@ -1315,8 +1345,7 @@ Public Class Service
 
         Dim bytes As Byte() = Encoding.UTF8.GetBytes(html)
 
-        res.WriteHeader("text/html; charset=utf-8", bytes.Length)
-        Call res.SendData(bytes)
+        res.WriteContent(bytes, "text/html; charset=utf-8")
     End Sub
 
 #End Region
@@ -1598,8 +1627,7 @@ Public Class Service
 
         Dim bytes As Byte() = Encoding.UTF8.GetBytes(json)
 
-        res.WriteHeader("application/json", bytes.Length)
-        Call res.SendData(bytes)
+        res.WriteContent(bytes, "application/json")
     End Sub
 
     Private Shared Sub writeResult(res As HttpResponse, ok As Boolean, message As String, Optional data As Dictionary(Of String, Object) = Nothing)
