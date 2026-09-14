@@ -64,7 +64,9 @@
     <Project Path="../JSql/src/JSql/JSql.vbproj">
       <Platform Solution="*|x64" Project="x64" />
     </Project>
-    <Project Path="src/LSP/languageserver/languageserver.vbproj" Id="6e70405c-d964-456b-8cdc-54140e7b3e1d" />
+    <Project Path="src/LSP/languageserver/languageserver.vbproj" Id="6e70405c-d964-456b-8cdc-54140e7b3e1d">
+      <Platform Solution="Release|x64" Project="x64" />
+    </Project>
     <Project Path="src/Nuget/Nuget.vbproj">
       <Platform Solution="*|x64" Project="x64" />
     </Project>
