@@ -9,8 +9,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\..\GCModeller\src\runtime\Darwinism\src\data\LINQ\LINQ\LINQ.vbproj" />
-    <ProjectReference Include="..\..\..\..\GCModeller\src\runtime\Darwinism\src\message\Rpc\Rpc.vbproj" />
-    <ProjectReference Include="..\..\..\..\GCModeller\src\runtime\Darwinism\src\message\XDRStream\XDRStream.vbproj" />
     <ProjectReference Include="..\..\..\..\GCModeller\src\runtime\sciBASIC#\Microsoft.VisualBasic.Core\src\Core.vbproj" />
     <ProjectReference Include="..\..\..\..\GCModeller\src\runtime\sciBASIC#\mime\text%markdown\markdown.NET5.vbproj" />
     <ProjectReference Include="..\..\..\..\GCModeller\src\runtime\sciBASIC#\vs_solutions\dev\VisualStudio\VisualStudio.NET5.vbproj" />
