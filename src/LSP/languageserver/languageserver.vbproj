@@ -5,6 +5,7 @@
     <RootNamespace>languageserver</RootNamespace>
     <TargetFramework>net10.0</TargetFramework>
     <Platforms>AnyCPU;x64</Platforms>
+    <StartupObject>languageserver.Program</StartupObject>
   </PropertyGroup>
 
   <ItemGroup>
@@ -14,6 +15,7 @@
     <ProjectReference Include="..\..\..\..\GCModeller\src\runtime\sciBASIC#\vs_solutions\dev\VisualStudio\VisualStudio.NET5.vbproj" />
     <ProjectReference Include="..\..\..\..\JSql\src\JSql\JSql.vbproj" />
     <ProjectReference Include="..\..\Nuget\Nuget.vbproj" />
+    <ProjectReference Include="..\..\Readership\Readership.vbproj" />
   </ItemGroup>
 
 </Project>
