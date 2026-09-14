@@ -48,35 +48,43 @@ Public Class CompletionProvider
 
         Dim prefix As String = ScriptAnalyzer.GetLinePrefix(text, line, character)
         Dim ctx As ScriptAnalyzer.CompletionContext = ScriptAnalyzer.ParseCompletion(prefix)
-        Dim items As List(Of JsonObject) = ComputeItems(ctx)
+        Dim items As List(Of JsonObject) = ComputeItems(ctx, text)
 
         Return BuildCompletionList(items)
     End Function
 
-    Private Function ComputeItems(ctx As ScriptAnalyzer.CompletionContext) As List(Of JsonObject)
+    Private Function ComputeItems(ctx As ScriptAnalyzer.CompletionContext, documentText As String) As List(Of JsonObject)
         Dim items As New List(Of JsonObject)()
 
         If ctx.afterDot AndAlso Not String.IsNullOrEmpty(ctx.container) Then
+            ' resolve a leading local variable to its declared type so that
+            ' "variable.Member" works without a compiler.
+            Dim container As String = ResolveContainer(ctx.container, documentText)
+
             ' the container is a known type: complete its members
-            Dim typeEntry As TypeEntry = index.FindType(ctx.container)
+            Dim typeEntry As TypeEntry = index.FindType(container)
+
+            If typeEntry Is Nothing Then
+                typeEntry = index.FindTypeByName(container)
+            End If
 
             If typeEntry IsNot Nothing Then
-                AddMembers(items, index.GetMembers(ctx.container), ctx.fragment)
+                AddMembers(items, index.GetMembers(typeEntry.type_fullname), ctx.fragment)
                 Return Truncate(items)
             End If
 
             ' otherwise treat the container as a (possibly fragment) namespace
-            For Each ns As String In index.MatchNestedNamespaces(ctx.container, ctx.fragment)
+            For Each ns As String In index.MatchNestedNamespaces(container, ctx.fragment)
                 AddNamespace(items, ns)
             Next
 
-            For Each t As TypeEntry In index.MatchTypesInNamespace(ctx.container, ctx.fragment)
+            For Each t As TypeEntry In index.MatchTypesInNamespace(container, ctx.fragment)
                 AddType(items, t)
             Next
 
             If items.Count = 0 Then
                 ' last resort: any type whose full name continues the container path
-                For Each t As TypeEntry In index.MatchTypes(ctx.container & "." & ctx.fragment)
+                For Each t As TypeEntry In index.MatchTypes(container & "." & ctx.fragment)
                     AddType(items, t)
                 Next
             End If
@@ -94,6 +102,30 @@ Public Class CompletionProvider
         Next
 
         Return Truncate(items)
+    End Function
+
+    ''' <summary>
+    ''' if the first segment of a dotted container is a local variable, replace it
+    ''' with the variable's declared type so member completion works. the rest of
+    ''' the chain is preserved (member types can not be followed without the data).
+    ''' </summary>
+    Private Function ResolveContainer(container As String, documentText As String) As String
+        If String.IsNullOrEmpty(documentText) Then
+            Return container
+        End If
+
+        Dim segs As String() = container.Split("."c)
+        Dim declared As String = VariableResolver.ResolveType(documentText, segs(0))
+
+        If String.IsNullOrEmpty(declared) Then
+            Return container
+        End If
+
+        If segs.Length = 1 Then
+            Return declared
+        End If
+
+        Return declared & "." & String.Join(".", segs, 1, segs.Length - 1)
     End Function
 
     Private Function Truncate(items As List(Of JsonObject)) As List(Of JsonObject)

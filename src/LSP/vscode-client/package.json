@@ -1,14 +1,15 @@
 {
   "name": "remote-vbnet-lsp",
   "displayName": "Remote VB.NET LSP",
-  "description": "Connects to the VB.NET script language server over TCP to provide IntelliSense (completion, hover, signature help) for VB scripts.",
+  "description": "Connects to the VB.NET script language server over TCP to provide IntelliSense (completion, hover, signature help) for VB scripts, and launches VB scripts via vbs.exe for debugging.",
   "version": "0.1.0",
   "publisher": "xdoc",
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Debuggers"
   ],
   "activationEvents": [
     "onLanguage:vbnet"
@@ -29,6 +30,59 @@
         "configuration": "./language-configuration.json"
       }
     ],
+    "debuggers": [
+      {
+        "type": "vbnet",
+        "label": "VB.NET",
+        "languages": [
+          "vbnet"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "要执行的 .vb/.vbs 脚本路径（可使用 ${file} 等变量）"
+              },
+              "vbsPath": {
+                "type": "string",
+                "description": "vbs.exe 宿主路径；留空则使用设置 myRemoteLsp.vbsExecutable"
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "传给脚本的命令行参数"
+              }
+            },
+            "required": [
+              "program"
+            ]
+          }
+        },
+        "configurationSnippets": [
+          {
+            "label": "VB.NET: Launch Script",
+            "description": "启动 vbs.exe 执行一个 VB 脚本",
+            "body": {
+              "type": "vbnet",
+              "request": "launch",
+              "name": "VB.NET: Launch ${fileBasename}",
+              "program": "${file}",
+              "vbsPath": "${config:myRemoteLsp.vbsExecutable}",
+              "args": []
+            }
+          }
+        ],
+        "debugAdapterExecutable": {
+          "command": "node",
+          "args": [
+            "./out/debugAdapter.js"
+          ]
+        }
+      }
+    ],
     "configuration": {
       "title": "Remote VB.NET LSP",
       "properties": {
@@ -41,6 +95,11 @@
           "type": "number",
           "default": 8080,
           "description": "Port the VB.NET language server is listening on."
+        },
+        "myRemoteLsp.vbsExecutable": {
+          "type": "string",
+          "default": "G:\\GCModeller\\src\\runtime\\sciBASIC#\\.nuget\\net10.0\\vbs.exe",
+          "description": "Path to the vbs.exe host used to execute VB scripts when debugging."
         }
       }
     }
@@ -51,6 +110,7 @@
     "watch": "tsc -watch -p ./"
   },
   "dependencies": {
+    "vscode-debugadapter": "^1.51.0",
     "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {

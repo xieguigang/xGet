@@ -36,7 +36,7 @@ Public Class HoverProvider
             Return Nothing
         End If
 
-        Dim markdown As String = Resolve(ctx)
+        Dim markdown As String = Resolve(ctx, text)
 
         If String.IsNullOrEmpty(markdown) Then
             Return Nothing
@@ -55,25 +55,29 @@ Public Class HoverProvider
 
     ''' <summary>
     ''' resolve the markdown documentation for the hover context. returns an empty
-    ''' string when the symbol can not be mapped to the api document database
-    ''' (for example an instance variable, which we can not resolve without a
-    ''' compiler).
+    ''' string when the symbol can not be mapped to the api document database.
+    ''' when the container is a local variable (e.g. "x" in "x.Member") it is first
+    ''' resolved to its declared type so member hover works without a compiler.
     ''' </summary>
-    Private Function Resolve(ctx As ScriptAnalyzer.HoverContext) As String
+    Private Function Resolve(ctx As ScriptAnalyzer.HoverContext, text As String) As String
         If Not String.IsNullOrEmpty(ctx.container) Then
+            ' resolve a leading local variable to its declared type so that
+            ' "variable.Member" hover works without a compiler.
+            Dim container As String = ResolveContainer(ctx.container, text)
+
             ' the symbol could be a nested type (container.word) or a member of the
             ' container type. try the combined type name first.
-            Dim fullType As String = ctx.container & "." & ctx.word
+            Dim fullType As String = container & "." & ctx.word
             Dim fullEntry As TypeEntry = index.FindType(fullType)
 
             If fullEntry IsNot Nothing Then
                 Return RenderType(fullEntry)
             End If
 
-            Dim typeEntry As TypeEntry = index.FindType(ctx.container)
+            Dim typeEntry As TypeEntry = index.FindType(container)
 
             If typeEntry Is Nothing Then
-                typeEntry = index.FindTypeByName(ctx.container)
+                typeEntry = index.FindTypeByName(container)
             End If
 
             If typeEntry Is Nothing Then
@@ -104,6 +108,30 @@ Public Class HoverProvider
         End If
 
         Return ""
+    End Function
+
+    ''' <summary>
+    ''' if the first segment of a dotted container is a local variable, replace it
+    ''' with the variable's declared type so member resolution works. the rest of
+    ''' the chain is preserved (member types can not be followed without the data).
+    ''' </summary>
+    Private Function ResolveContainer(container As String, text As String) As String
+        If String.IsNullOrEmpty(text) Then
+            Return container
+        End If
+
+        Dim segs As String() = container.Split("."c)
+        Dim declared As String = VariableResolver.ResolveType(text, segs(0))
+
+        If String.IsNullOrEmpty(declared) Then
+            Return container
+        End If
+
+        If segs.Length = 1 Then
+            Return declared
+        End If
+
+        Return declared & "." & String.Join(".", segs, 1, segs.Length - 1)
     End Function
 
     Private Function FindMember(members As List(Of ApiDocMember), name As String) As ApiDocMember
