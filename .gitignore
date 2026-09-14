@@ -270,3 +270,4 @@ about-trend.png
 /dist/tmp/e2e-data/db/nuget
 /dist/tmp/sitemap.xml
 /dist/tmp/sitemap.state
+dist/nuget_server.err
