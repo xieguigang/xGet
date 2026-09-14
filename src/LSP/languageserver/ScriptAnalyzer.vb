@@ -70,15 +70,16 @@ Public Module ScriptAnalyzer
             character = line.Length
         End If
 
-        ' prefer the word immediately before the cursor
-        Dim endPos As Integer = character
-        While endPos > 0 AndAlso IsIdentChar(line(endPos - 1))
-            endPos -= 1
-        End While
-
-        Dim startPos As Integer = endPos
+        ' scan left from the cursor to find the start of the word
+        Dim startPos As Integer = character
         While startPos > 0 AndAlso IsIdentChar(line(startPos - 1))
             startPos -= 1
+        End While
+
+        ' scan right from the cursor to find the end of the word
+        Dim endPos As Integer = character
+        While endPos < line.Length AndAlso IsIdentChar(line(endPos))
+            endPos += 1
         End While
 
         result.start = startPos
@@ -192,7 +193,10 @@ Public Module ScriptAnalyzer
         ctx.wordStart = word.start
 
         If word.start > 0 AndAlso word.start <= line.Length AndAlso line(word.start - 1) = "."c Then
-            ctx.container = line.Substring(0, word.start - 1).Trim()
+            ' only keep the trailing dotted identifier chain before the dot, so that
+            ' a type reference like "Dim x As New System.Text.StringBuilder" resolves
+            ' to the container "System.Text" rather than the leading keywords.
+            ctx.container = TrailingQualifier(line.Substring(0, word.start - 1)).Trim()
         End If
 
         Return ctx

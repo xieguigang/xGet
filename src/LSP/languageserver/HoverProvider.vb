@@ -61,21 +61,34 @@ Public Class HoverProvider
     ''' </summary>
     Private Function Resolve(ctx As ScriptAnalyzer.HoverContext) As String
         If Not String.IsNullOrEmpty(ctx.container) Then
+            ' the symbol could be a nested type (container.word) or a member of the
+            ' container type. try the combined type name first.
+            Dim fullType As String = ctx.container & "." & ctx.word
+            Dim fullEntry As TypeEntry = index.FindType(fullType)
+
+            If fullEntry IsNot Nothing Then
+                Return RenderType(fullEntry)
+            End If
+
             Dim typeEntry As TypeEntry = index.FindType(ctx.container)
+
+            If typeEntry Is Nothing Then
+                typeEntry = index.FindTypeByName(ctx.container)
+            End If
 
             If typeEntry Is Nothing Then
                 Return ""
             End If
 
             ' a member of the container type is being inspected
-            Dim members As List(Of ApiDocMember) = index.GetMembers(ctx.container)
+            Dim members As List(Of ApiDocMember) = index.GetMembers(typeEntry.type_fullname)
             Dim member As ApiDocMember = FindMember(members, ctx.word)
 
             If member IsNot Nothing Then
                 Return RenderMember(typeEntry.type_fullname, member)
             End If
 
-            ' otherwise show the type itself
+            ' otherwise show the container type itself
             Return RenderType(typeEntry)
         End If
 
