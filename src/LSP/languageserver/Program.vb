@@ -62,7 +62,7 @@ Module Program
         index.Build()
         Console.WriteLine($"loaded {index.TypeCount} types across {index.NamespaceCount} namespaces from the nuget database.")
 
-        server = New TcpListener(IPAddress.Loopback, port)
+        server = New TcpListener(IPAddress.Any, port)
         server.Start()
         Console.WriteLine($"LSP server listening on port {port} (press Ctrl+C to stop)...")
 
