@@ -13,6 +13,9 @@
     <Project Path="../GCModeller/src/runtime/sciBASIC#/Microsoft.VisualBasic.Core/src/Core.vbproj">
       <Platform Solution="*|x64" Project="x64" />
     </Project>
+    <Project Path="../GCModeller/src/runtime/sciBASIC#/vs_solutions/dev/VisualStudio/VisualStudio.NET5.vbproj">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
   </Folder>
   <Folder Name="/framework/doc/">
     <Project Path="../GCModeller/src/runtime/sciBASIC#/Data/DataFrame/dataframework-netcore5.vbproj">
@@ -52,6 +55,7 @@
     <Project Path="../JSql/src/JSql/JSql.vbproj">
       <Platform Solution="*|x64" Project="x64" />
     </Project>
+    <Project Path="src/LSP/languageserver/languageserver.vbproj" Id="6e70405c-d964-456b-8cdc-54140e7b3e1d" />
     <Project Path="src/Nuget/Nuget.vbproj">
       <Platform Solution="*|x64" Project="x64" />
     </Project>
