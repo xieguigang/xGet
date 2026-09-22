@@ -30,7 +30,7 @@ Public Class NugetApiClient
         .PropertyNameCaseInsensitive = True
     }
 
-    Private Shared ReadOnly Http As New HttpClient()
+    Private Shared ReadOnly Http As New HttpClient() With {.Timeout = TimeSpan.FromMinutes(10)}
 
     Private ReadOnly baseUrl As String
 
