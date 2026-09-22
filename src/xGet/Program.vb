@@ -1,5 +1,7 @@
 Imports System
 Imports System.Collections.Generic
+Imports System.Diagnostics
+Imports System.Globalization
 Imports System.IO
 
 ''' <summary>
@@ -14,8 +16,8 @@ Module Program
         vbCrLf &
         "usage:" & vbCrLf &
         "  xGet register --server <url> --email <email>" & vbCrLf &
-        "  xGet upload   --server <url> --email <email> --file <package.nupkg>" & vbCrLf &
-        "  xGet batch    --server <url> --email <email> --dir <folder> [--recursive] [--symbols]" & vbCrLf &
+        "  xGet upload   --server <url> --email <email> --file <package.nupkg> [--timeout <minutes>]" & vbCrLf &
+        "  xGet batch    --server <url> --email <email> --dir <folder> [--recursive] [--symbols] [--timeout <minutes>]" & vbCrLf &
         vbCrLf &
         "options:" & vbCrLf &
         "  --server, -s   the nuget server base url, e.g. http://localhost:80" & vbCrLf &
@@ -23,7 +25,8 @@ Module Program
         "  --file,   -f   the .nupkg file to upload" & vbCrLf &
         "  --dir,    -d   the folder to scan for batch upload" & vbCrLf &
         "  --recursive    scan the sub directories too" & vbCrLf &
-        "  --symbols      also upload the *.snupkg / *.symbols.nupkg packages"
+        "  --symbols      also upload the *.snupkg / *.symbols.nupkg packages" & vbCrLf &
+        "  --timeout, -t  the upload timeout in minutes (default: 15, decimals allowed)"
 
     Function Main(args As String()) As Integer
         If args Is Nothing OrElse args.Length = 0 Then
@@ -91,6 +94,13 @@ Module Program
             Return 1
         End If
 
+        Dim timeout As TimeSpan? = parseTimeout(options)
+
+        If timeout Is Nothing Then
+            Call Console.WriteLine("invalid --timeout value, please provide a positive number of minutes")
+            Return 1
+        End If
+
         Dim account As New AccountStore()
         Dim secret As String = account.GetSecret(server, email)
 
@@ -102,7 +112,7 @@ Module Program
 
         Dim code As String = Nuget.TotpModule.GenerateTotp(secret)
         Dim client As New NugetApiClient(server)
-        Dim result As ApiResult = client.Upload(email, code, package)
+        Dim result As ApiResult = client.Upload(email, code, package, timeout)
 
         If result Is Nothing OrElse Not result.ok Then
             Call Console.WriteLine($"upload failed: {If(result?.message, "unknown error")}")
@@ -128,12 +138,19 @@ Module Program
         Dim symbols As Boolean = hasFlag(options, "symbols")
 
         If String.IsNullOrEmpty(server) OrElse String.IsNullOrEmpty(email) OrElse String.IsNullOrEmpty(folder) Then
-            Call Console.WriteLine("usage: xGet batch --server <url> --email <email> --dir <folder> [--recursive] [--symbols]")
+            Call Console.WriteLine("usage: xGet batch --server <url> --email <email> --dir <folder> [--recursive] [--symbols] [--timeout <minutes>]")
             Return 1
         End If
 
         If Not Directory.Exists(folder) Then
             Call Console.WriteLine($"folder not found: {folder}")
+            Return 1
+        End If
+
+        Dim timeout As TimeSpan? = parseTimeout(options)
+
+        If timeout Is Nothing Then
+            Call Console.WriteLine("invalid --timeout value, please provide a positive number of minutes")
             Return 1
         End If
 
@@ -163,6 +180,7 @@ Module Program
         Dim uploaded As Integer = 0
         Dim skipped As Integer = 0
         Dim failed As Integer = 0
+        Dim totalWatch As Stopwatch = Stopwatch.StartNew()
 
         For i As Integer = 0 To files.Count - 1
             Dim package As String = files(i)
@@ -171,28 +189,33 @@ Module Program
             ' regenerate a fresh TOTP code for every package, otherwise a long
             ' batch upload could outlive the 30 seconds time step of one code.
             Dim code As String = Nuget.TotpModule.GenerateTotp(secret)
-            Dim result As ApiResult = client.Upload(email, code, package)
+            Dim watch As Stopwatch = Stopwatch.StartNew()
+            Dim result As ApiResult = client.Upload(email, code, package, timeout)
+            watch.Stop()
+
+            Dim elapsed As String = formatElapsed(watch.Elapsed)
             Dim message As String = If(result?.message, "")
 
             If result IsNot Nothing AndAlso result.ok Then
                 uploaded += 1
-                Call Console.WriteLine($"[{i + 1}/{files.Count}] ok      {name}")
+                Call Console.WriteLine($"[{i + 1}/{files.Count}] ok      {name} ({elapsed})")
             ElseIf message.IndexOf("already exists", StringComparison.OrdinalIgnoreCase) >= 0 Then
                 skipped += 1
-                Call Console.WriteLine($"[{i + 1}/{files.Count}] skip    {name} (already exists)")
+                Call Console.WriteLine($"[{i + 1}/{files.Count}] skip    {name} (already exists) ({elapsed})")
             ElseIf message.IndexOf("TOTP", StringComparison.OrdinalIgnoreCase) >= 0 OrElse
                    message.IndexOf("invalid email", StringComparison.OrdinalIgnoreCase) >= 0 Then
                 failed += 1
-                Call Console.WriteLine($"[{i + 1}/{files.Count}] FAILED  {name}: {message}")
-                Call Console.WriteLine("authentication failed, aborting the batch upload.")
+                Call Console.WriteLine($"[{i + 1}/{files.Count}] FAILED  {name}: {message} ({elapsed})")
+                Call Console.WriteLine($"authentication failed, aborting the batch upload (total {formatElapsed(totalWatch.Elapsed)}).")
                 Return 3
             Else
                 failed += 1
-                Call Console.WriteLine($"[{i + 1}/{files.Count}] failed  {name}: {message}")
+                Call Console.WriteLine($"[{i + 1}/{files.Count}] failed  {name}: {message} ({elapsed})")
             End If
         Next
 
-        Call Console.WriteLine($"batch upload finished: {uploaded} uploaded, {skipped} skipped, {failed} failed (total {files.Count})")
+        totalWatch.Stop()
+        Call Console.WriteLine($"batch upload finished: {uploaded} uploaded, {skipped} skipped, {failed} failed (total {files.Count}) in {formatElapsed(totalWatch.Elapsed)}")
         Return 0
     End Function
 
@@ -269,6 +292,39 @@ Module Program
             End If
         Next
         Return ""
+    End Function
+
+    ''' <summary>
+    ''' read the "--timeout" option as a number of minutes. an absent option falls
+    ''' back to the client default, while an explicit but invalid value returns
+    ''' Nothing so that the caller can report the error.
+    ''' </summary>
+    Private Function parseTimeout(options As Dictionary(Of String, String)) As TimeSpan?
+        Dim raw As String = getOption(options, "timeout", "t")
+
+        If String.IsNullOrEmpty(raw) Then
+            Return NugetApiClient.DefaultTimeout
+        End If
+
+        Dim minutes As Double
+
+        If Not Double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, minutes) OrElse minutes <= 0 Then
+            Return Nothing
+        End If
+
+        Return TimeSpan.FromMinutes(minutes)
+    End Function
+
+    ''' <summary>
+    ''' format a duration for the console report: seconds for the short uploads
+    ''' and minutes plus seconds for the longer ones.
+    ''' </summary>
+    Private Function formatElapsed(value As TimeSpan) As String
+        If value.TotalSeconds >= 60 Then
+            Return $"{CInt(Math.Floor(value.TotalMinutes))}m{value.Seconds:00}.{value.Milliseconds \ 10:00}s"
+        End If
+
+        Return $"{value.TotalSeconds:0.00}s"
     End Function
 
     Private Sub printUsage()
