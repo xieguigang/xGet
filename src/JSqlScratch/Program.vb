@@ -62,9 +62,17 @@ Module Program
             ok = PackageValidator.Validate(made, reason)
             Call Console.WriteLine($"made package: validate={ok}  reason={reason}")
 
-            ' control: the raw dll on disk
+            ' control: the raw dll on disk, step by step
             Using disk As New IO.FileStream(args(3), IO.FileMode.Open, IO.FileAccess.Read)
-                Call Console.WriteLine($"disk dll managed={PackageValidator.IsManagedAssembly(disk)}")
+                Dim b(4095) As Byte
+                Dim t2 As Integer = disk.Read(b, 0, b.Length)
+                Dim mz = b(0) Or (b(1) << 8)
+                Dim peOff = b(&H3C) Or (b(&H3D) << 8) Or (b(&H3E) << 16) Or (b(&H3F) << 24)
+                Dim sig = b(peOff) Or (b(peOff + 1) << 8) Or (b(peOff + 2) << 16) Or (b(peOff + 3) << 24)
+                Dim mg = b(peOff + 24) Or (b(peOff + 25) << 8)
+                Dim ddOff = If(mg = &H20B, peOff + 24 + 112, peOff + 24 + 96)
+                Dim clr = b(ddOff + 112) Or (b(ddOff + 113) << 8) Or (b(ddOff + 114) << 16) Or (b(ddOff + 115) << 24)
+                Call Console.WriteLine($"disk: t2={t2} mz=0x{mz:X4} pe={peOff} sig=0x{sig:X8} magic=0x{mg:X4} dd={ddOff} clr=0x{clr:X} result={PackageValidator.IsManagedAssembly(disk)}")
             End Using
         End If
 
