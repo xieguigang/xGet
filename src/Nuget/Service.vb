@@ -654,6 +654,12 @@ Public Class Service
             Return
         End If
 
+        If store.IsUserBanned(email) Then
+            Call $"upload rejected: the account '{email}' is banned".warning()
+            res.WriteError(HTTP_RFC.RFC_FORBIDDEN, "this account is banned and can not upload packages")
+            Return
+        End If
+
         Dim upload As HttpPostedFile = firstUpload(req)
 
         If upload Is Nothing Then
@@ -865,7 +871,8 @@ Public Class Service
             uploader = store.GetPackageUploader(latest.package_id)
         End If
 
-        Dim uploaderOfficial As Boolean = store.IsUserOfficial(uploader)
+        Dim uploaderFlags As UserFlagRecord = store.GetUserFlags(uploader)
+        Dim uploaderOfficial As Boolean = uploaderFlags.official
 
         Dim iconFile As String = ""
         If metadata.TryGetValue("iconFile", iconFile) AndAlso Not String.IsNullOrEmpty(iconFile) Then
@@ -918,6 +925,8 @@ Public Class Service
             {"published", isoDate(latest.published)},
             {"uploader", uploader},
             {"uploaderOfficial", uploaderOfficial},
+            {"uploaderDemo", uploaderFlags.demo},
+            {"uploaderBanned", uploaderFlags.banned},
             {"iconUrl", If(String.IsNullOrEmpty(iconFile), "", $"{baseUrl}/api/icon/{Uri.EscapeDataString(latest.package_id)}")},
             {"readme", readmeInfo(baseUrl, latest)},
             {"docs", docsInfo(latest)},
@@ -1258,6 +1267,116 @@ Public Class Service
 
         Return points
     End Function
+
+#End Region
+
+#Region "reverse dependencies and user pages"
+
+    ''' <summary>
+    ''' every package of the feed that depends on the given package (the reverse
+    ''' dependency view of the ``dependents.html`` page).
+    ''' </summary>
+    <HttpGet("/api/dependents/{id}")>
+    Public Sub ApiPackageDependents(req As HttpRequest, res As HttpResponse)
+        Dim id As String = routeValue(req, "id")
+
+        If store.GetVersions(id).Count = 0 Then
+            res.WriteError(HTTP_RFC.RFC_NOT_FOUND, $"package '{id}' was not found")
+            Return
+        End If
+
+        Dim dependents As List(Of NuspecDependency) = store.GetPackageDependents(id)
+        Dim summaries As Dictionary(Of String, PackageSummary) = store.ListPackages("") _
+            .GroupBy(Function(p) p.package_id, StringComparer.OrdinalIgnoreCase) _
+            .ToDictionary(Function(g) g.Key, Function(g) g.First(), StringComparer.OrdinalIgnoreCase)
+
+        Dim items As New List(Of Object)
+
+        For Each item As NuspecDependency In dependents
+            Dim summary As PackageSummary = Nothing
+            summaries.TryGetValue(item.id, summary)
+
+            items.Add(New Dictionary(Of String, Object) From {
+                {"id", item.id},
+                {"latestVersion", If(summary IsNot Nothing, summary.latest_version, "")},
+                {"downloads", If(summary IsNot Nothing, summary.total_downloads, 0L)},
+                {"versionRange", If(item.range, "")},
+                {"url", $"package.html?id={Uri.EscapeDataString(item.id)}"}
+            })
+        Next
+
+        res.AccessControlAllowOrigin = "*"
+        writeJson(res, New Dictionary(Of String, Object) From {
+            {"id", id},
+            {"total", items.Count},
+            {"dependents", items}
+        })
+    End Sub
+
+    ''' <summary>
+    ''' the profile of one uploader account: its admin flags, the packages that
+    ''' it uploaded and the distinct project urls of those packages. this feeds
+    ''' the ``user.html`` page.
+    ''' </summary>
+    <HttpGet("/api/user/{email}")>
+    Public Sub ApiUserProfile(req As HttpRequest, res As HttpResponse)
+        Dim email As String = routeValue(req, "email")
+
+        If String.IsNullOrEmpty(email) OrElse Not email.Contains("@") Then
+            res.WriteError(HTTP_RFC.RFC_BAD_REQUEST, "a valid email address is expected")
+            Return
+        End If
+
+        email = email.Trim().ToLowerInvariant()
+        Dim flags As UserFlagRecord = store.GetUserFlags(email)
+        Dim packages As List(Of PackageSummary) = store.GetUserPackages(email)
+        Dim projects As List(Of ProjectInfo) = store.GetUserProjects(email)
+
+        res.AccessControlAllowOrigin = "*"
+        writeJson(res, New Dictionary(Of String, Object) From {
+            {"email", email},
+            {"flags", New Dictionary(Of String, Object) From {
+                {"official", flags.official},
+                {"demo", flags.demo},
+                {"banned", flags.banned}
+            }},
+            {"packageCount", packages.Count},
+            {"totalDownloads", packages.Sum(Function(p) p.total_downloads)},
+            {"packages", packages.Select(AddressOf packageSummaryJson).ToList()},
+            {"projects", projects.Select(Function(p) CObj(New Dictionary(Of String, Object) From {
+                {"url", p.url},
+                {"host", p.host},
+                {"packageCount", p.packageCount}
+            })).ToList()}
+        })
+    End Sub
+
+    ''' <summary>
+    ''' the daily download / page view / doc view series aggregated over every
+    ''' package that the given account has uploaded.
+    ''' </summary>
+    <HttpGet("/api/activity/user/{email}")>
+    Public Sub ApiUserActivity(req As HttpRequest, res As HttpResponse)
+        Dim email As String = routeValue(req, "email")
+
+        If String.IsNullOrEmpty(email) Then
+            res.WriteError(HTTP_RFC.RFC_BAD_REQUEST, "the email route value is required")
+            Return
+        End If
+
+        Dim days As Integer = clampDays(req)
+        Dim activity As List(Of DailyActivity) = store.GetUserActivityAggregate(email.Trim().ToLowerInvariant(), days)
+
+        res.AccessControlAllowOrigin = "*"
+        writeJson(res, New Dictionary(Of String, Object) From {
+            {"email", email},
+            {"days", days},
+            {"totalDownloads", activity.Sum(Function(a) a.downloads)},
+            {"totalViews", activity.Sum(Function(a) a.views)},
+            {"totalDocViews", activity.Sum(Function(a) a.docViews)},
+            {"points", activitySeries(activity, days)}
+        })
+    End Sub
 
 #End Region
 

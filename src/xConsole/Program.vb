@@ -33,8 +33,10 @@ Module Program
         "commands:" & vbCrLf &
         "  tables                     list the database tables" & vbCrLf &
         "  tables <name>              print the rows of one table (--skip N --limit N)" & vbCrLf &
-        "  user list                  list the registered accounts (email, official, created)" & vbCrLf &
+        "  user list                  list the registered accounts (email, official, demo, banned, created)" & vbCrLf &
         "  user official <email> <on|off>   set or clear the official badge of an account" & vbCrLf &
+        "  user demo <email> <on|off>     set or clear the demo badge of an account" & vbCrLf &
+        "  user banned <email> <on|off>   set or clear the upload ban of an account" & vbCrLf &
         "  user delete <email>        delete an account (its uploaded packages are kept)" & vbCrLf &
         "  user reset <email>         reset the TOTP secret and print the new otpauth link" & vbCrLf &
         "  blacklist list             list the blacklisted email account domains" & vbCrLf &
@@ -233,40 +235,16 @@ Module Program
                 Call Console.WriteLine()
 
                 For Each item As UserRecord In users.OrderBy(Function(u) u.id)
+                    Dim flags As UserFlagRecord = store.GetUserFlags(item.email)
                     Call Console.WriteLine($"  #{item.id}  {item.email}")
-                    Call Console.WriteLine($"      official: {If(item.official, "yes", "no")}   created: {item.created:yyyy-MM-dd HH:mm:ss} UTC")
+                    Call Console.WriteLine($"      official: {If(flags.official, "yes", "no")}   demo: {If(flags.demo, "yes", "no")}   banned: {If(flags.banned, "yes", "no")}")
+                    Call Console.WriteLine($"      created: {item.created:yyyy-MM-dd HH:mm:ss} UTC")
                 Next
 
                 Return 0
 
-            Case "official"
-                If positional.Count < 3 Then
-                    Call Console.WriteLine("usage: xConsole user official <email> <on|off>")
-                    Return 1
-                End If
-
-                Dim email As String = positional(1)
-                Dim flagText As String = positional(2).ToLowerInvariant()
-                Dim flag As Boolean
-
-                If flagText = "on" OrElse flagText = "true" OrElse flagText = "yes" Then
-                    flag = True
-                ElseIf flagText = "off" OrElse flagText = "false" OrElse flagText = "no" Then
-                    flag = False
-                Else
-                    Call Console.WriteLine($"invalid flag value: '{flagText}' (on or off is expected)")
-                    Return 1
-                End If
-
-                Call store.SetUserOfficial(email, flag)
-                Call Console.WriteLine($"the account '{email}' is {(If(flag, "now marked as", "no longer marked as"))} official.")
-
-                ' also report the account when it does not exist yet
-                If store.GetUser(email) Is Nothing Then
-                    Call Console.WriteLine("note: this email has no registered account yet, the flag will apply after the registration.")
-                End If
-
-                Return 0
+            Case "official", "demo", "banned"
+                Return setUserFlagAction(positional, action)
 
             Case "delete", "del", "rm"
                 If positional.Count < 2 Then
@@ -323,9 +301,55 @@ Module Program
 
             Case Else
                 Call Console.WriteLine($"unknown user action: '{action}'")
-                Call Console.WriteLine("available actions: list, official, delete, reset")
+                Call Console.WriteLine("available actions: list, official, demo, banned, delete, reset")
                 Return 1
         End Select
+    End Function
+
+    ''' <summary>
+    ''' the shared implementation of the ``user official`` / ``user demo`` /
+    ''' ``user banned`` flag actions.
+    ''' </summary>
+    Private Function setUserFlagAction(positional As List(Of String), flagName As String) As Integer
+        If positional.Count < 3 Then
+            Call Console.WriteLine($"usage: xConsole user {flagName} <email> <on|off>")
+            Return 1
+        End If
+
+        Dim email As String = positional(1)
+        Dim flagText As String = positional(2).ToLowerInvariant()
+        Dim flag As Boolean
+
+        If flagText = "on" OrElse flagText = "true" OrElse flagText = "yes" Then
+            flag = True
+        ElseIf flagText = "off" OrElse flagText = "false" OrElse flagText = "no" Then
+            flag = False
+        Else
+            Call Console.WriteLine($"invalid flag value: '{flagText}' (on or off is expected)")
+            Return 1
+        End If
+
+        Call store.SetUserFlag(email, flagName, flag)
+
+        Select Case flagName
+            Case "official"
+                Call Console.WriteLine($"the account '{email}' is {(If(flag, "now marked as", "no longer marked as"))} official.")
+            Case "demo"
+                Call Console.WriteLine($"the account '{email}' is {(If(flag, "now marked as", "no longer marked as"))} a demo account.")
+            Case "banned"
+                If flag Then
+                    Call Console.WriteLine($"the account '{email}' is now banned (its upload requests are rejected).")
+                Else
+                    Call Console.WriteLine($"the ban of the account '{email}' was lifted.")
+                End If
+        End Select
+
+        ' also report the account when it does not exist yet
+        If store.GetUser(email) Is Nothing Then
+            Call Console.WriteLine("note: this email has no registered account yet, the flag will apply after the registration.")
+        End If
+
+        Return 0
     End Function
 
 #End Region

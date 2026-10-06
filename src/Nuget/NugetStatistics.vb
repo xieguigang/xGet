@@ -179,8 +179,10 @@ Public Module NugetStatistics
     ''' <summary>
     ''' build the dependency network where each edge points from the depending
     ''' package to the package it depends on. dependencies that are not hosted
-    ''' in this feed are added as <c>external</c> nodes:
-    ''' <c>{ nodes: [ { id, name, external } ], links: [ { source, target } ] }</c>.
+    ''' in this feed are added as <c>external</c> nodes, and every hosted node
+    ''' carries the host of its nuspec ``projectUrl`` (an empty string when the
+    ''' package declares no project url) for the project colour grouping:
+    ''' <c>{ nodes: [ { id, name, external, project } ], links: [ { source, target } ] }</c>.
     ''' </summary>
     Public Function BuildDependencyNetwork(packages As List(Of PackageRecord)) As String
         Dim latest As List(Of PackageRecord) = LatestPackages(packages)
@@ -191,7 +193,8 @@ Public Module NugetStatistics
             nodes(idLower) = New Dictionary(Of String, Object) From {
                 {"id", idLower},
                 {"name", pkg.package_id},
-                {"external", False}
+                {"external", False},
+                {"project", NugetStore.ProjectHost(pkg.project_url)}
             }
         Next
 
@@ -208,7 +211,8 @@ Public Module NugetStatistics
                     nodes(toId) = New Dictionary(Of String, Object) From {
                         {"id", toId},
                         {"name", dependencyId},
-                        {"external", True}
+                        {"external", True},
+                        {"project", ""}
                     }
                 End If
 

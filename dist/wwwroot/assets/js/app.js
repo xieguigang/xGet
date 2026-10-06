@@ -252,11 +252,21 @@
     }
 
     function trendOption(series) {
+        /* the doc view counts are usually orders of magnitude larger than the
+           downloads and the page views (the api doc site ships thousands of
+           static pages), so the doc views series is plotted on a log10(1 + v)
+           scale: the raw values are kept for the tooltip. */
+        var docRaw = series.docViews;
+        var docLog = docRaw.map(function (v) {
+            return v > 0 ? Math.round(Math.log10(1 + v) * 100) / 100 : 0;
+        });
+        var DOC_NAME = 'doc views (log)';
+
         return {
             backgroundColor: 'transparent',
             grid: { left: 10, right: 16, top: 34, bottom: 4, containLabel: true },
             legend: {
-                data: ['downloads', 'page views', 'doc views'],
+                data: ['downloads', 'page views', DOC_NAME],
                 right: 6,
                 top: 0,
                 icon: 'roundRect',
@@ -274,7 +284,12 @@
                 formatter: function (params) {
                     var lines = [esc(params[0].axisValue)];
                     params.forEach(function (p) {
-                        lines.push(p.marker + ' ' + esc(p.seriesName) + ' · <b>' + formatNumber(p.value) + '</b>');
+                        /* the doc views series carries the log10 values: the
+                           tooltip restores the raw count from the closure. */
+                        var value = (p.seriesName === DOC_NAME)
+                            ? (docRaw[p.dataIndex] || 0)
+                            : p.value;
+                        lines.push(p.marker + ' ' + esc(p.seriesName) + ' · <b>' + formatNumber(value) + '</b>');
                     });
                     return lines.join('<br/>');
                 }
@@ -297,7 +312,7 @@
             series: [
                 areaLine('downloads', series.downloads, TREND.downloads),
                 areaLine('page views', series.views, TREND.views),
-                areaLine('doc views', series.docViews, TREND.docs)
+                areaLine(DOC_NAME, docLog, TREND.docs)
             ]
         };
     }

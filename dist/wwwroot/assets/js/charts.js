@@ -611,18 +611,57 @@
             degree[l.target] = (degree[l.target] || 0) + 1;
         });
 
+        /* the project colour grouping: every distinct host of the nuspec
+           projectUrl of a hosted package forms one colour group, packages
+           without a project url are grey and the external dependencies stay
+           blue. the group list is ordered by the node count so that the
+           legend puts the biggest projects first. */
+        var NO_PROJECT = '(no project)';
+        var EXTERNAL = 'external';
+        var projectHosts = {};
+
+        graph.nodes.forEach(function (n) {
+            if (n.external === true) {
+                return;
+            }
+            var g = n.project ? String(n.project) : NO_PROJECT;
+            projectHosts[g] = (projectHosts[g] || 0) + 1;
+        });
+
+        var groups = Object.keys(projectHosts).sort(function (a, b) {
+            return projectHosts[b] - projectHosts[a] || a.localeCompare(b);
+        });
+
+        var groupColor = {};
+        groups.forEach(function (g, i) {
+            groupColor[g] = PALETTE[i % PALETTE.length];
+        });
+
+        var categories = groups.map(function (g) {
+            return { name: g, itemStyle: { color: groupColor[g] } };
+        });
+        categories.push({ name: EXTERNAL, itemStyle: { color: '#6fa8dc' } });
+
+        var categoryOf = {};
+        groups.forEach(function (g, i) {
+            categoryOf[g] = i;
+        });
+        categoryOf[EXTERNAL] = categories.length - 1;
+
         var nodes = graph.nodes.map(function (n) {
             var external = n.external === true;
             var d = degree[n.id] || 1;
+            var group = external ? EXTERNAL : (n.project ? String(n.project) : NO_PROJECT);
             return {
                 id: n.id,
                 name: n.name,
                 external: external,
-                category: external ? 1 : 0,
+                project: external ? '' : group,
+                category: categoryOf[group],
                 value: d,
                 symbolSize: Math.min(34, 7 + Math.sqrt(d) * 5),
                 itemStyle: {
-                    color: external ? '#6fa8dc' : ACCENT,
+                    color: external ? '#6fa8dc' : groupColor[group],
                     borderColor: 'rgba(3,3,3,.8)',
                     borderWidth: 1
                 }
@@ -643,13 +682,17 @@
                     if (p.dataType === 'edge') {
                         return esc(p.data.source) + ' → ' + esc(p.data.target);
                     }
+                    var projectLine = (!p.data.external && p.data.project && p.data.project !== NO_PROJECT)
+                        ? '<br/>project: ' + esc(p.data.project)
+                        : '';
                     return '<b>' + esc(p.data.name) + '</b><br/>'
                         + (p.data.external ? 'external dependency' : 'hosted package')
+                        + projectLine
                         + '<br/>dependencies: ' + p.data.value;
                 }
             }, tooltip),
             legend: [{
-                data: ['hosted', 'external'],
+                data: groups.concat([EXTERNAL]),
                 textStyle: { color: TEXT, fontSize: 11 },
                 top: 4,
                 right: 8,
@@ -663,10 +706,7 @@
                 roam: true,
                 draggable: true,
                 focusNodeAdjacency: true,
-                categories: [
-                    { name: 'hosted', itemStyle: { color: ACCENT } },
-                    { name: 'external', itemStyle: { color: '#6fa8dc' } }
-                ],
+                categories: categories,
                 /* the node names are hidden by default so that the network
                    stays readable; hovering a node reveals the name of the
                    focused node and of its one hop neighbours together with the
