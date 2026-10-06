@@ -272,3 +272,8 @@ about-trend.png
 /dist/tmp/sitemap.state
 dist/nuget_server.err
 dist/lsp_server.err
+x/nuget/email_blacklist.jsonl
+x/nuget/email_blacklist.jsonl.idx
+x/nuget/email_blacklist.jsonl.lock
+x/nuget/email_blacklist.jsonl.wal
+x/nuget/email_blacklist.schema.json

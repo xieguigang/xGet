@@ -7,5 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\..\JSql\src\JSql\JSql.vbproj" />
+    <ProjectReference Include="..\Nuget\Nuget.vbproj" />
   </ItemGroup>
 </Project>

@@ -76,44 +76,58 @@ Public Module PackageValidator
     ''' structural test whether the given pe image is a managed assembly: the
     ''' clr runtime header entry (data directory index 14) of the optional
     ''' header must be non zero.
+    ''' 
+    ''' the check reads at most one 4 KB buffer from the stream and never uses
+    ''' ``Stream.Length``/``Stream.Seek``: the deflate stream of a zip entry
+    ''' does not support them.
     ''' </summary>
-    ''' <param name="stream">the positioned pe image stream (read from any offset).</param>
+    ''' <param name="stream">the pe image stream (read from the current position).</param>
     Public Function IsManagedAssembly(stream As Stream) As Boolean
-        If stream Is Nothing OrElse Not stream.CanRead OrElse Not stream.CanSeek Then
+        If stream Is Nothing OrElse Not stream.CanRead Then
             Return False
         End If
 
         Try
-            If stream.Length < &H40 Then
+            Dim buffer(4095) As Byte
+            Dim total As Integer = 0
+            Dim read As Integer
+
+            Do While total < buffer.Length
+                read = stream.Read(buffer, total, buffer.Length - total)
+
+                If read <= 0 Then
+                    Exit Do
+                End If
+
+                total += read
+            Loop
+
+            ' the dos header needs at least 64 bytes
+            If total < &H40 Then
                 Return False
             End If
 
             ' dos header: "MZ" (little endian 0x4D 'M', 0x5A 'Z')
-            Call stream.Seek(0, SeekOrigin.Begin)
-            If readUInt16(stream) <> &H5A4DI Then
+            If readU16(buffer, 0) <> &H5A4D Then
                 Return False
             End If
 
             ' the pe header offset from the dos stub
-            Call stream.Seek(&H3C, SeekOrigin.Begin)
-            Dim peOffset As Integer = readInt32(stream)
+            Dim peOffset As Integer = readI32(buffer, &H3C)
 
-            If peOffset <= 0 OrElse peOffset + 264 > stream.Length Then
+            If peOffset <= 0 OrElse peOffset + 264 > total Then
                 Return False
             End If
 
             ' the "PE\0\0" signature
-            Call stream.Seek(peOffset, SeekOrigin.Begin)
-            If readInt32(stream) <> &H4550I Then
+            If readI32(buffer, peOffset) <> &H4550 Then
                 Return False
             End If
 
             ' the optional header follows the 20 bytes coff header
-            Dim optionalHeader As Long = peOffset + 24
-            Call stream.Seek(optionalHeader, SeekOrigin.Begin)
-
-            Dim magic As Integer = readUInt16(stream)
-            Dim dataDirectories As Long
+            Dim optionalHeader As Integer = peOffset + 24
+            Dim magic As Integer = readU16(buffer, optionalHeader)
+            Dim dataDirectories As Integer
 
             Select Case magic
                 Case &H10BI  ' pe32
@@ -125,8 +139,7 @@ Public Module PackageValidator
             End Select
 
             ' data directory index 14: the clr runtime header
-            Call stream.Seek(dataDirectories + 14 * 8, SeekOrigin.Begin)
-            Dim clrRva As Integer = readInt32(stream)
+            Dim clrRva As Integer = readI32(buffer, dataDirectories + 14 * 8)
 
             Return clrRva <> 0
         Catch
@@ -134,27 +147,11 @@ Public Module PackageValidator
         End Try
     End Function
 
-    Private Function readUInt16(stream As Stream) As Integer
-        Dim low As Integer = stream.ReadByte()
-        Dim high As Integer = stream.ReadByte()
-
-        If high < 0 Then
-            Throw New EndOfStreamException()
-        End If
-
-        Return low Or (high << 8)
+    Private Function readU16(buffer As Byte(), offset As Integer) As Integer
+        Return buffer(offset) Or (buffer(offset + 1) << 8)
     End Function
 
-    Private Function readInt32(stream As Stream) As Integer
-        Dim b0 As Integer = stream.ReadByte()
-        Dim b1 As Integer = stream.ReadByte()
-        Dim b2 As Integer = stream.ReadByte()
-        Dim b3 As Integer = stream.ReadByte()
-
-        If b3 < 0 Then
-            Throw New EndOfStreamException()
-        End If
-
-        Return b0 Or (b1 << 8) Or (b2 << 16) Or (b3 << 24)
+    Private Function readI32(buffer As Byte(), offset As Integer) As Integer
+        Return buffer(offset) Or (buffer(offset + 1) << 8) Or (buffer(offset + 2) << 16) Or (buffer(offset + 3) << 24)
     End Function
 End Module
