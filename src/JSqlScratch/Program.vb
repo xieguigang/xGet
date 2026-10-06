@@ -62,17 +62,35 @@ Module Program
             ok = PackageValidator.Validate(made, reason)
             Call Console.WriteLine($"made package: validate={ok}  reason={reason}")
 
-            ' control: the raw dll on disk, step by step
-            Using disk As New IO.FileStream(args(3), IO.FileMode.Open, IO.FileAccess.Read)
+            ' control: the raw dll on disk via a fresh stream, step by step
+            Dim dllPath As String = args(3)
+            Call Console.WriteLine($"path={dllPath}")
+            Call Console.WriteLine($"fullpath={IO.Path.GetFullPath(dllPath)} exists={IO.File.Exists(dllPath)} len={New IO.FileInfo(dllPath).Length}")
+
+            ' cross check: readallbytes vs filestream, then copy for the shell
+            Dim all As Byte() = IO.File.ReadAllBytes(dllPath)
+            Call Console.WriteLine($"readallbytes: len={all.Length} first4={all(0):X2}-{all(1):X2}-{all(2):X2}-{all(3):X2}")
+
+            Dim copyPath As String = IO.Path.Combine(IO.Path.GetTempPath(), "crosscheck-" & Guid.NewGuid().ToString("N") & ".dll")
+            Call IO.File.Copy(dllPath, copyPath, True)
+            Dim copyBytes As Byte() = IO.File.ReadAllBytes(copyPath)
+            Call Console.WriteLine($"copied to {copyPath}: len={copyBytes.Length} first4={copyBytes(0):X2}-{copyBytes(1):X2}-{copyBytes(2):X2}-{copyBytes(3):X2}")
+
+            Using disk As New IO.FileStream(dllPath, IO.FileMode.Open, IO.FileAccess.Read)
                 Dim b(4095) As Byte
-                Dim t2 As Integer = disk.Read(b, 0, b.Length)
-                Dim mz = b(0) Or (b(1) << 8)
-                Dim peOff = b(&H3C) Or (b(&H3D) << 8) Or (b(&H3E) << 16) Or (b(&H3F) << 24)
-                Dim sig = b(peOff) Or (b(peOff + 1) << 8) Or (b(peOff + 2) << 16) Or (b(peOff + 3) << 24)
-                Dim mg = b(peOff + 24) Or (b(peOff + 25) << 8)
-                Dim ddOff = If(mg = &H20B, peOff + 24 + 112, peOff + 24 + 96)
-                Dim clr = b(ddOff + 112) Or (b(ddOff + 113) << 8) Or (b(ddOff + 114) << 16) Or (b(ddOff + 115) << 24)
-                Call Console.WriteLine($"disk: t2={t2} mz=0x{mz:X4} pe={peOff} sig=0x{sig:X8} magic=0x{mg:X4} dd={ddOff} clr=0x{clr:X} result={PackageValidator.IsManagedAssembly(disk)}")
+                Dim t2 As Integer = 0
+                Do While t2 < b.Length
+                    Dim r As Integer = disk.Read(b, t2, b.Length - t2)
+                    If r <= 0 Then Exit Do
+                    t2 += r
+                Loop
+                Dim mz As Integer = b(0) Or (b(1) << 8)
+                Dim peOff As Integer = b(&H3C) Or (b(&H3D) << 8) Or (b(&H3E) << 16) Or (b(&H3F) << 24)
+                Dim sig As Integer = b(peOff) Or (b(peOff + 1) << 8) Or (b(peOff + 2) << 16) Or (b(peOff + 3) << 24)
+                Dim mg As Integer = b(peOff + 24) Or (b(peOff + 25) << 8)
+                Dim ddOff As Integer = If(mg = &H20B, peOff + 24 + 112, peOff + 24 + 96)
+                Dim clr As Integer = b(ddOff + 112) Or (b(ddOff + 113) << 8) Or (b(ddOff + 114) << 16) Or (b(ddOff + 115) << 24)
+                Call Console.WriteLine($"disk: t2={t2} mz=0x{mz:X4} pe={peOff} sig=0x{sig:X8} magic=0x{mg:X4} dd={ddOff} clr=0x{clr:X}")
             End Using
         End If
 
