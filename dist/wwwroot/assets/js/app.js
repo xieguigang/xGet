@@ -1104,9 +1104,9 @@
             if (packages.length) {
                 var rows = packages.map(function (p) {
                     return '<tr>' +
-                        '<td><a href="package.html?id=' + encodeURIComponent(p.package_id) + '"><span class="u">' + esc(p.package_id) + '</span></a></td>' +
-                        '<td class="mono">' + esc(p.latest_version || '') + '</td>' +
-                        '<td class="mono">' + esc(formatNumber(p.total_downloads || 0)) + '</td>' +
+                        '<td><a href="package.html?id=' + encodeURIComponent(p.id) + '"><span class="u">' + esc(p.id) + '</span></a></td>' +
+                        '<td class="mono">' + esc(p.latestVersion || '') + '</td>' +
+                        '<td class="mono">' + esc(formatNumber(p.totalDownloads || 0)) + '</td>' +
                         '<td class="mono">' + esc(String(p.versions || 0)) + '</td>' +
                         '<td class="mono">' + esc(isoDay(p.published)) + '</td>' +
                         '</tr>';
