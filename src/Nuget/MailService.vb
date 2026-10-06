@@ -224,12 +224,16 @@ Public Module MailService
     ''' <summary>
     ''' render an error page for an invalid or expired verification link.
     ''' </summary>
-    Public Function RenderVerifyFailed(templateDirectory As String, reason As String) As String
+    ''' <param name="templateDirectory">the template directory of the server.</param>
+    ''' <param name="reason">the human readable failure reason.</param>
+    ''' <param name="serverUrl">the public base url used by the re-registration hint.</param>
+    Public Function RenderVerifyFailed(templateDirectory As String, reason As String, serverUrl As String) As String
         Dim values As New Dictionary(Of String, String) From {
-            {"reason", DocHtml.Escape(reason)}
+            {"reason", DocHtml.Escape(reason)},
+            {"server", DocHtml.Escape(If(serverUrl, ""))}
         }
 
-        Return renderTemplate(templateDirectory, "verify-success.html", values, fallbackVerifyFailed)
+        Return renderTemplate(templateDirectory, "verify-failed.html", values, fallbackVerifyFailed)
     End Function
 
     ''' <summary>

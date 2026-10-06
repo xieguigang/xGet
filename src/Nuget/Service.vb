@@ -536,6 +536,14 @@ Public Class Service
 
         If Not MailService.Send(MailService.LoadConfig(store, config.DataDirectory), email,
                                 $"verify your email address on {serverUrl}", body, mailError) Then
+            ' the pending record would never be received by the user, so it is
+            ' removed right away instead of blocking the email for 30 minutes
+            Dim orphan As PendingRegistrationRecord = store.GetPendingRegistration(token)
+
+            If orphan IsNot Nothing Then
+                Call store.DeletePendingRegistration(orphan.id)
+            End If
+
             Call $"the verification mail to '{email}' could not be sent: {mailError}".warning()
             res.WriteError(HTTP_RFC.RFC_INTERNAL_SERVER_ERROR, $"the verification email could not be sent: {mailError}")
             Return
@@ -561,9 +569,11 @@ Public Class Service
     <HttpGet("/api/verify")>
     Public Sub VerifyEmail(req As HttpRequest, res As HttpResponse)
         Dim token As String = queryValue(req, "token")
+        Dim serverUrl As String = getBaseUrl(req)
 
         If token.StringEmpty() Then
-            Call writeHtml(res, MailService.RenderVerifyFailed(config.TemplateDirectory, "the verification link is invalid: the token is missing."))
+            Call writeHtml(res, MailService.RenderVerifyFailed(config.TemplateDirectory,
+                "the verification link is invalid: the token is missing.", serverUrl))
             Return
         End If
 
@@ -572,7 +582,7 @@ Public Class Service
         If pending Is Nothing Then
             Call "email verification failed: the token was not found".warning()
             Call writeHtml(res, MailService.RenderVerifyFailed(config.TemplateDirectory,
-                "the verification link is invalid or it was already used."))
+                "the verification link is invalid or it was already used.", serverUrl))
             Return
         End If
 
@@ -580,7 +590,7 @@ Public Class Service
             Call store.DeletePendingRegistration(pending.id)
             Call $"email verification failed: the token of '{pending.email}' has expired".warning()
             Call writeHtml(res, MailService.RenderVerifyFailed(config.TemplateDirectory,
-                "the verification link has expired (the validity window is 30 minutes)."))
+                "the verification link has expired (the validity window is 30 minutes).", serverUrl))
             Return
         End If
 
@@ -594,7 +604,6 @@ Public Class Service
         Call store.DeleteExpiredRegistrations()
 
         ' the base64 authorization payload: email + server url + totp secret
-        Dim serverUrl As String = getBaseUrl(req)
         Dim payloadJson As String = JsonSerializer.Serialize(New Dictionary(Of String, String) From {
             {"email", pending.email},
             {"server", serverUrl},

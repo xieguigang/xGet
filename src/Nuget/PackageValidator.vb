@@ -183,7 +183,7 @@ Public Module PackageValidator
 
     ''' <summary>
     ''' little endian scalar readers. the byte values must be widened with
-    ''' ``CInt`` before shifting: in VB ``Byte << 8`` yields a Byte again (the
+    ''' ``CInt`` before shifting: in VB ``Byte &lt;&lt; 8`` yields a Byte again (the
     ''' shift count is taken modulo 8), which silently drops the high bytes.
     ''' </summary>
     Private Function readU16(buffer As Byte(), offset As Integer) As Integer
