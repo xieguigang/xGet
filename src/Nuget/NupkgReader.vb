@@ -3,7 +3,34 @@ Imports System.IO
 Imports System.IO.Compression
 Imports System.Linq
 Imports System.Text
+Imports System.Xml
 Imports System.Xml.Linq
+
+''' <summary>
+''' the extraction limits of one nupkg zip container. every limit is enforced
+''' against the actual streamed byte count (and never against the untrusted
+''' ``entry.Length`` field of the zip central directory), so a decompression
+''' bomb can not exhaust the server disk or memory.
+''' </summary>
+Public Class ZipExtractionLimits
+
+    ''' <summary>the maximum uncompressed size of one zip entry.</summary>
+    Public Property MaxEntryBytes As Long
+
+    ''' <summary>the maximum total uncompressed size of all entries.</summary>
+    Public Property MaxTotalBytes As Long
+
+    ''' <summary>the maximum number of entries of the container.</summary>
+    Public Property MaxEntries As Integer
+
+    Public Sub New(Optional maxEntryMB As Double = 64,
+                   Optional maxTotalMB As Double = 512,
+                   Optional maxEntries As Integer = 2048)
+        Me.MaxEntryBytes = CLng(maxEntryMB * 1024 * 1024)
+        Me.MaxTotalBytes = CLng(maxTotalMB * 1024 * 1024)
+        Me.MaxEntries = maxEntries
+    End Sub
+End Class
 
 ''' <summary>
 ''' one dependency entry of the nuspec manifest.
@@ -59,11 +86,40 @@ End Class
 ''' </summary>
 Public Module NupkgReader
 
+    ''' <summary>
+    ''' the safe xml reader settings: DTD processing is prohibited (which rules
+    ''' out both the XXE entity expansion and the billion laughs attack), no
+    ''' external resolver is installed and the entity expansion is capped.
+    ''' </summary>
+    Private ReadOnly SafeXmlSettings As New XmlReaderSettings With {
+        .DtdProcessing = DtdProcessing.Prohibit,
+        .XmlResolver = Nothing,
+        .MaxCharactersFromEntities = 0,
+        .CloseInput = True
+    }
+
+    ''' <summary>
+    ''' the maximum character count of one parsed text entry (the nuspec, the
+    ''' readme documents and so on).
+    ''' </summary>
+    Private Const MaxTextEntryChars As Integer = 4 * 1024 * 1024
+
     Public Function ReadMetadata(nupkgPath As String) As NupkgMetadata
         Dim raw As String = ReadNuspecXml(nupkgPath)
-        Dim metadata As NupkgMetadata = parse(XDocument.Parse(raw))
+        Dim document As XDocument = parseSafeXml(raw)
+        Dim metadata As NupkgMetadata = parse(document)
         metadata.RawXml = raw
         Return metadata
+    End Function
+
+    ''' <summary>
+    ''' parse an xml text through the safe reader settings: a document which
+    ''' carries a DTD is rejected outright.
+    ''' </summary>
+    Private Function parseSafeXml(raw As String) As XDocument
+        Using reader As XmlReader = XmlReader.Create(New StringReader(raw), SafeXmlSettings)
+            Return XDocument.Load(reader)
+        End Using
     End Function
 
     Public Function ReadNuspecXml(nupkgPath As String) As String
@@ -73,11 +129,77 @@ Public Module NupkgReader
                 Throw New InvalidDataException("the nuspec manifest was not found in the package.")
             End If
             Using stream As Stream = entry.Open()
-                Using reader As New StreamReader(stream)
-                    Return reader.ReadToEnd()
-                End Using
+                Return ReadTextEntry(stream)
             End Using
         End Using
+    End Function
+
+    ''' <summary>
+    ''' read a text entry with a hard character budget: a nuspec which claims a
+    ''' tiny size but expands to gigabytes of text can not exhaust the memory.
+    ''' </summary>
+    Private Function ReadTextEntry(stream As Stream) As String
+        Using reader As New StreamReader(stream, detectEncodingFromByteOrderMarks:=True)
+            Dim buffer(16 * 1024 - 1) As Char
+            Dim sb As New StringBuilder
+            Dim total As Integer = 0
+            Dim read As Integer
+
+            Do
+                read = reader.Read(buffer, 0, buffer.Length)
+
+                If read <= 0 Then
+                    Exit Do
+                End If
+
+                total += read
+
+                If total > MaxTextEntryChars Then
+                    Throw New InvalidDataException($"the xml entry exceeds the {MaxTextEntryChars \ (1024 * 1024)} MB text limit.")
+                End If
+
+                Call sb.Append(buffer, 0, read)
+            Loop
+
+            Return sb.ToString()
+        End Using
+    End Function
+
+    ''' <summary>
+    ''' the whitelist of the icon image extensions which may be extracted from a
+    ''' package.
+    ''' </summary>
+    Public ReadOnly IconExtensions As String() = {".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".webp"}
+
+    ''' <summary>
+    ''' the whitelist of the readme document extensions which may be extracted
+    ''' from a package.
+    ''' </summary>
+    Public ReadOnly ReadmeExtensions As String() = {".md", ".markdown", ".txt"}
+
+    ''' <summary>
+    ''' resolve the file extension of a nuspec declared icon / readme entry
+    ''' against a whitelist. Every other extension (or a name which carries no
+    ''' extension at all) falls back to the given default, so that a hostile
+    ''' value like ``../../evil.exe`` can never control the file name of the
+    ''' extraction target.
+    ''' </summary>
+    Public Function SafeExtension(name As String, allowed As String(), fallback As String) As String
+        Dim extension As String = Path.GetExtension(If(name, ""))
+
+        If extension.StringEmpty() Then
+            Return fallback
+        End If
+
+        extension = extension.ToLowerInvariant()
+
+        For Each item As String In allowed
+            If item.Equals(extension, StringComparison.Ordinal) Then
+                Return extension
+            End If
+        Next
+
+        Return fallback
     End Function
 
     ''' <summary>
@@ -86,8 +208,10 @@ Public Module NupkgReader
     ''' <param name="nupkgPath">the physical nupkg path.</param>
     ''' <param name="iconName">the icon path stored in the nuspec ``icon`` element.</param>
     ''' <param name="destination">the file path to write the icon bytes to.</param>
+    ''' <param name="limits">the extraction limits (optional).</param>
     ''' <returns><c>True</c> when an icon image was extracted.</returns>
-    Public Function ExtractIcon(nupkgPath As String, iconName As String, destination As String) As Boolean
+    Public Function ExtractIcon(nupkgPath As String, iconName As String, destination As String,
+                                Optional limits As ZipExtractionLimits = Nothing) As Boolean
         If String.IsNullOrEmpty(iconName) Then
             Return False
         End If
@@ -101,8 +225,19 @@ Public Module NupkgReader
                 Return False
             End If
 
-            Call Directory.CreateDirectory(Path.GetDirectoryName(destination))
-            Call entry.ExtractToFile(destination, overwrite:=True)
+            Dim folder As String = Path.GetDirectoryName(destination)
+            If Not String.IsNullOrEmpty(folder) Then
+                Call Directory.CreateDirectory(folder)
+            End If
+
+            Call assertDestination(destination)
+
+            Using source As Stream = entry.Open()
+                Using target As Stream = File.Create(destination)
+                    Call copyLimited(source, target, limits, 0)
+                End Using
+            End Using
+
             Return True
         End Using
     End Function
@@ -118,8 +253,10 @@ Public Module NupkgReader
     ''' ``README.md`` or ``docs/README.md``.
     ''' </param>
     ''' <param name="destination">the file path to write the entry text to.</param>
+    ''' <param name="limits">the extraction limits (optional).</param>
     ''' <returns><c>True</c> when the entry was found and extracted.</returns>
-    Public Function ExtractEntry(nupkgPath As String, entryName As String, destination As String) As Boolean
+    Public Function ExtractEntry(nupkgPath As String, entryName As String, destination As String,
+                                 Optional limits As ZipExtractionLimits = Nothing) As Boolean
         If String.IsNullOrEmpty(entryName) Then
             Return False
         End If
@@ -137,13 +274,15 @@ Public Module NupkgReader
                 Call Directory.CreateDirectory(folder)
             End If
 
+            Call assertDestination(destination)
+
+            Dim text As String
+
             Using stream As Stream = entry.Open()
-                Using reader As New StreamReader(stream, detectEncodingFromByteOrderMarks:=True)
-                    Dim text As String = reader.ReadToEnd()
-                    Call File.WriteAllText(destination, text, New UTF8Encoding(encoderShouldEmitUTF8Identifier:=False))
-                End Using
+                text = ReadTextEntry(stream)
             End Using
 
+            Call File.WriteAllText(destination, text, New UTF8Encoding(encoderShouldEmitUTF8Identifier:=False))
             Return True
         End Using
     End Function
@@ -157,12 +296,25 @@ Public Module NupkgReader
     ''' with the highest priority which actually contains an xml comment document
     ''' is used, and the entries are flattened into the destination folder so
     ''' that every ``*.xml`` finds its sibling ``*.dll`` by the file name.
+    ''' 
+    ''' every limit of <paramref name="limits"/> is enforced against the actual
+    ''' streamed byte count, so a decompression bomb can not exhaust the disk.
     ''' </summary>
     ''' <param name="nupkgPath">the physical nupkg path.</param>
     ''' <param name="destination">the folder to extract the comment documents to.</param>
+    ''' <param name="limits">the extraction limits (optional).</param>
     ''' <returns>the number of the extracted xml comment documents.</returns>
-    Public Function ExtractLibComments(nupkgPath As String, destination As String) As Integer
+    Public Function ExtractLibComments(nupkgPath As String, destination As String,
+                                       Optional limits As ZipExtractionLimits = Nothing) As Integer
+        If limits Is Nothing Then
+            limits = New ZipExtractionLimits()
+        End If
+
         Using zip As ZipArchive = ZipFile.OpenRead(nupkgPath)
+            If zip.Entries.Count > limits.MaxEntries Then
+                Throw New InvalidDataException($"the package carries {zip.Entries.Count} entries which exceeds the limit of {limits.MaxEntries}.")
+            End If
+
             Dim groups As New Dictionary(Of String, List(Of ZipArchiveEntry))(StringComparer.OrdinalIgnoreCase)
 
             For Each entry As ZipArchiveEntry In zip.Entries
@@ -178,7 +330,7 @@ Public Module NupkgReader
 
                 Dim extension As String = Path.GetExtension(name).ToLowerInvariant()
 
-                If extension <> ".xml" AndAlso extension <> ".dll" AndAlso extension <> ".exe" Then
+                If extension <> ".xml" AndAlso extension <> ".dll" Then
                     Continue For
                 End If
 
@@ -216,21 +368,36 @@ Public Module NupkgReader
                 Return 0
             End If
 
-            Call Directory.CreateDirectory(destination)
+            Dim destinationFull As String = Path.GetFullPath(Path.TrimEndingDirectorySeparator(Path.GetFullPath(destination)))
+            Call Directory.CreateDirectory(destinationFull)
 
             Dim count As Integer = 0
+            Dim totalBytes As Long = 0
 
             For Each entry As ZipArchiveEntry In best
-                Dim target As String = Path.Combine(destination, Path.GetFileName(entry.FullName))
+                Dim fileName As String = Path.GetFileName(entry.FullName.Replace("\"c, "/"c))
 
-                If String.IsNullOrEmpty(Path.GetFileName(target)) Then
+                ' skip the dot entries which ``Path.GetFileName`` passes through
+                If fileName.StringEmpty() OrElse fileName = "." OrElse fileName = ".." Then
+                    Continue For
+                End If
+
+                Dim target As String = Path.Combine(destinationFull, fileName)
+                Dim targetFull As String = Path.GetFullPath(target)
+
+                ' the extraction target must stay inside the destination folder
+                If Not targetFull.StartsWith(destinationFull & Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) Then
                     Continue For
                 End If
 
                 Try
-                    Call entry.ExtractToFile(target, overwrite:=True)
+                    Using source As Stream = entry.Open()
+                        Using targetStream As Stream = File.Create(targetFull)
+                            Call copyLimited(source, targetStream, limits, totalBytes)
+                        End Using
+                    End Using
 
-                    If Path.GetExtension(target).Equals(".xml", StringComparison.OrdinalIgnoreCase) Then
+                    If Path.GetExtension(targetFull).Equals(".xml", StringComparison.OrdinalIgnoreCase) Then
                         count += 1
                     End If
                 Catch ex As Exception
@@ -241,6 +408,58 @@ Public Module NupkgReader
             Return count
         End Using
     End Function
+
+    ''' <summary>
+    ''' stream copy one entry with the extraction limits enforced against the
+    ''' actual byte count.
+    ''' </summary>
+    ''' <param name="source">the (deflated) entry stream.</param>
+    ''' <param name="target">the destination file stream.</param>
+    ''' <param name="limits">the limits of the current extraction.</param>
+    ''' <param name="totalBytes">the running total byte counter of the extraction.</param>
+    Private Sub copyLimited(source As Stream, target As Stream, limits As ZipExtractionLimits, ByRef totalBytes As Long)
+        If limits Is Nothing Then
+            limits = New ZipExtractionLimits()
+        End If
+
+        Dim buffer(8191) As Byte
+        Dim entryBytes As Long = 0
+        Dim read As Integer
+
+        Do
+            read = source.Read(buffer, 0, buffer.Length)
+
+            If read <= 0 Then
+                Exit Do
+            End If
+
+            entryBytes += read
+            totalBytes += read
+
+            If entryBytes > limits.MaxEntryBytes Then
+                Throw New InvalidDataException($"one zip entry exceeds the {limits.MaxEntryBytes \ (1024 * 1024)} MB size limit.")
+            End If
+
+            If totalBytes > limits.MaxTotalBytes Then
+                Throw New InvalidDataException($"the zip entries exceed the {limits.MaxTotalBytes \ (1024 * 1024)} MB total size limit.")
+            End If
+
+            Call target.Write(buffer, 0, read)
+        Loop
+    End Sub
+
+    ''' <summary>
+    ''' test whether the given destination file path is well formed and does not
+    ''' escape its declared directory.
+    ''' </summary>
+    Private Sub assertDestination(destination As String)
+        Dim full As String = Path.GetFullPath(destination)
+        Dim fileName As String = Path.GetFileName(full)
+
+        If fileName.StringEmpty() OrElse fileName = "." OrElse fileName = ".." Then
+            Throw New InvalidDataException("the extraction destination file name is invalid.")
+        End If
+    End Sub
 
     ''' <summary>
     ''' the directory part of a package relative entry path

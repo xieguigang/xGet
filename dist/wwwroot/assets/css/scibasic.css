@@ -826,6 +826,23 @@ a.chip:hover {
     background: var(--panel-3);
 }
 
+/* the official account badge of the package uploader row */
+.official-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border: 1px solid var(--green);
+    border-radius: 999px;
+    background: var(--panel-3);
+    background: color-mix(in srgb, var(--green) 12%, transparent);
+    color: var(--green);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    line-height: 1.5;
+    white-space: nowrap;
+    user-select: none;
+}
+
 .dep-group {
     margin-bottom: 18px;
 }

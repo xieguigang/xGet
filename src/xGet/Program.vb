@@ -3,6 +3,7 @@ Imports System.Collections.Generic
 Imports System.Diagnostics
 Imports System.Globalization
 Imports System.IO
+Imports System.Text.Json
 
 ''' <summary>
 ''' xGet: an experimental nuget client that only implements the two operations
@@ -16,17 +17,25 @@ Module Program
         vbCrLf &
         "usage:" & vbCrLf &
         "  xGet register --server <url> --email <email>" & vbCrLf &
+        "  xGet activate --server <url> --email <email> --code <base64 authorization code>" & vbCrLf &
         "  xGet upload   --server <url> --email <email> --file <package.nupkg> [--timeout <minutes>]" & vbCrLf &
         "  xGet batch    --server <url> --email <email> --dir <folder> [--recursive] [--symbols] [--timeout <minutes>]" & vbCrLf &
         vbCrLf &
         "options:" & vbCrLf &
         "  --server, -s   the nuget server base url, e.g. http://localhost:80" & vbCrLf &
         "  --email,  -e   the registered user email" & vbCrLf &
+        "  --code,   -c   the base64 authorization code of the email verification success page" & vbCrLf &
         "  --file,   -f   the .nupkg file to upload" & vbCrLf &
         "  --dir,    -d   the folder to scan for batch upload" & vbCrLf &
         "  --recursive    scan the sub directories too" & vbCrLf &
         "  --symbols      also upload the *.snupkg / *.symbols.nupkg packages" & vbCrLf &
-        "  --timeout, -t  the upload timeout in minutes (default: 15, decimals allowed)"
+        "  --timeout, -t  the upload timeout in minutes (default: 15, decimals allowed)" & vbCrLf &
+        vbCrLf &
+        "registration flow:" & vbCrLf &
+        "  1. xGet register asks the server to send a verification mail to your inbox;" & vbCrLf &
+        "  2. open the verification link (valid for 30 minutes);" & vbCrLf &
+        "  3. copy the base64 authorization code from the success page;" & vbCrLf &
+        "  4. save it locally with 'xGet activate --server <url> --email <email> --code <code>'."
 
     Function Main(args As String()) As Integer
         If args Is Nothing OrElse args.Length = 0 Then
@@ -40,6 +49,8 @@ Module Program
         Select Case command
             Case "register", "reg"
                 Return register(options)
+            Case "activate", "active", "login"
+                Return activate(options)
             Case "upload", "push"
                 Return upload(options)
             Case "batch", "upload-dir"
@@ -54,6 +65,12 @@ Module Program
         End Select
     End Function
 
+    ''' <summary>
+    ''' ask the server to start the registration of the given email: the server
+    ''' sends a verification mail and the registration is completed on the
+    ''' verification success page (whose base64 authorization code is saved
+    ''' locally through the ``activate`` command).
+    ''' </summary>
     Private Function register(options As Dictionary(Of String, String)) As Integer
         Dim server As String = getOption(options, "server", "s")
         Dim email As String = getOption(options, "email", "e")
@@ -66,17 +83,108 @@ Module Program
         Dim client As New NugetApiClient(server)
         Dim result As ApiResult = client.Register(email)
 
-        If result Is Nothing OrElse Not result.ok OrElse String.IsNullOrEmpty(result.secret) Then
-            Call Console.WriteLine($"registration failed: {If(result?.message, "unknown error")}")
+        If result Is Nothing Then
+            Call Console.WriteLine("registration failed: unknown error")
             Return 2
         End If
 
-        Dim account As New AccountStore()
-        Call account.Save(server, email, result.secret)
+        ' the server has no smtp account configured yet: the verification mail
+        ' can not be sent, the user has to remind the server administrator.
+        If result.warning = "mail-not-configured" Then
+            Call Console.WriteLine("WARNING: the mail server of the nuget server is not configured yet,")
+            Call Console.WriteLine("         so the verification email can not be sent.")
+            Call Console.WriteLine("         please remind the server administrator to configure the")
+            Call Console.WriteLine("         mail server in the backend (xConsole: 'mail set').")
+            Return 3
+        End If
 
-        Call Console.WriteLine($"registered '{email}' on {server}")
+        If Not result.ok Then
+            Call Console.WriteLine($"registration failed: {If(result.message, "unknown error")}")
+            Return 2
+        End If
+
+        Call Console.WriteLine(result.message)
+        Call Console.WriteLine()
+        Call Console.WriteLine("next steps:")
+        Call Console.WriteLine("  1. open the verification link in your mailbox (it is valid for 30 minutes);")
+        Call Console.WriteLine("  2. copy the base64 authorization code from the verification success page;")
+        Call Console.WriteLine("  3. save it locally with:")
+        Call Console.WriteLine($"     xGet activate --server {normalizeServer(server)} --email {email} --code <the base64 code>")
+        Return 0
+    End Function
+
+    ''' <summary>
+    ''' save the base64 authorization code of the email verification success
+    ''' page into the local account store: the code carries the email, the
+    ''' server url and the TOTP secret of the new account.
+    ''' </summary>
+    Private Function activate(options As Dictionary(Of String, String)) As Integer
+        Dim server As String = getOption(options, "server", "s")
+        Dim email As String = getOption(options, "email", "e")
+        Dim code As String = getOption(options, "code", "c")
+
+        If String.IsNullOrEmpty(server) OrElse String.IsNullOrEmpty(code) Then
+            Call Console.WriteLine("usage: xGet activate --server <url> --email <email> --code <base64 authorization code>")
+            Return 1
+        End If
+
+        Dim payload As Dictionary(Of String, String) = decodeAuthorization(code)
+
+        If payload Is Nothing Then
+            Call Console.WriteLine("activation failed: the --code value is not a valid base64 authorization code.")
+            Return 1
+        End If
+
+        Dim payloadServer As String = normalizeServer(payload("server"))
+        Dim payloadEmail As String = If(payload("email"), "").Trim()
+        Dim secret As String = If(payload("secret"), "")
+
+        If String.IsNullOrEmpty(payloadEmail) OrElse String.IsNullOrEmpty(secret) Then
+            Call Console.WriteLine("activation failed: the authorization code is incomplete (email or totp secret is missing).")
+            Return 1
+        End If
+
+        If Not String.IsNullOrEmpty(email) AndAlso
+           Not payloadEmail.Equals(email.Trim(), StringComparison.OrdinalIgnoreCase) Then
+            Call Console.WriteLine($"activation failed: the code was issued for '{payloadEmail}', not for '{email}'.")
+            Return 1
+        End If
+
+        If Not payloadServer.Equals(normalizeServer(server), StringComparison.OrdinalIgnoreCase) Then
+            Call Console.WriteLine($"activation failed: the code was issued for the server '{payloadServer}', not for '{normalizeServer(server)}'.")
+            Return 1
+        End If
+
+        Dim account As New AccountStore()
+        Call account.Save(payloadServer, payloadEmail, secret)
+
+        Call Console.WriteLine($"the account '{payloadEmail}' on {payloadServer} is now activated.")
         Call Console.WriteLine($"the TOTP secret has been saved to: {account.StoreFile}")
         Return 0
+    End Function
+
+    ''' <summary>
+    ''' decode the base64 authorization payload (a json object with the keys
+    ''' ``email``, ``server`` and ``secret``).
+    ''' </summary>
+    Private Function decodeAuthorization(code As String) As Dictionary(Of String, String)
+        Try
+            Dim json As String = Text.Encoding.UTF8.GetString(Convert.FromBase64String(If(code, "").Trim()))
+            Return JsonSerializer.Deserialize(Of Dictionary(Of String, String))(json)
+        Catch ex As Exception
+            Return Nothing
+        End Try
+    End Function
+
+    Private Function normalizeServer(server As String) As String
+        Dim url As String = If(server, "").Trim().TrimEnd("/"c)
+
+        If url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) OrElse
+           url.StartsWith("https://", StringComparison.OrdinalIgnoreCase) Then
+            Return url
+        End If
+
+        Return If(url = "", "", "http://" & url)
     End Function
 
     Private Function upload(options As Dictionary(Of String, String)) As Integer

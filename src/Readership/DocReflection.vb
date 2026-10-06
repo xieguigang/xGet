@@ -1,5 +1,6 @@
 Imports System.IO
 Imports System.Reflection
+Imports System.Runtime.InteropServices
 Imports System.Runtime.Loader
 
 ''' <summary>
@@ -10,10 +11,13 @@ Imports System.Runtime.Loader
 ''' of a comment document and appends the missing members (public only) to the
 ''' document model, with an empty comment text.
 ''' 
-''' The assemblies are loaded from their raw bytes into a collectible
-''' <see cref="AssemblyLoadContext"/> which is unloaded when the extraction
-''' finished: this keeps the server process from accumulating assemblies and it
-''' does not lock the package files.
+''' The assemblies are loaded into a <see cref="MetadataLoadContext"/> which
+''' reads the clr metadata only: no module initializer, no type initializer and
+''' no custom attribute constructor of the inspected assembly is ever executed,
+''' so a hostile uploaded assembly can not run any code inside this process.
+''' The <see cref="PathAssemblyResolver"/> is restricted to the runtime library
+''' folder and the package folder (a whitelist), so the inspected assembly can
+''' not pull in arbitrary assemblies from the application directory either.
 ''' </summary>
 Public Module DocReflection
 
@@ -29,18 +33,24 @@ Public Module DocReflection
             Return
         End If
 
-        Dim context As New AssemblyLoadContext("xdoc-reflection-" & Guid.NewGuid().ToString("N"), isCollectible:=True)
+        Dim targets As New List(Of String)
 
-        Try
+        For Each xml As String In xmlDocuments
+            Dim assemblyPath As String = Path.ChangeExtension(xml, ".dll")
+
+            If File.Exists(assemblyPath) Then
+                Call targets.Add(assemblyPath)
+            End If
+        Next
+
+        If targets.Count = 0 Then
+            Return
+        End If
+
+        Using context As MetadataLoadContext = createMetadataContext(targets, warnings)
             Dim cache As New Dictionary(Of String, Assembly)(StringComparer.OrdinalIgnoreCase)
 
-            For Each xml As String In xmlDocuments
-                Dim assemblyPath As String = Path.ChangeExtension(xml, ".dll")
-
-                If Not File.Exists(assemblyPath) Then
-                    Continue For
-                End If
-
+            For Each assemblyPath As String In targets
                 Dim asm As Assembly = loadAssembly(context, assemblyPath, cache, warnings)
 
                 If asm Is Nothing Then
@@ -49,13 +59,54 @@ Public Module DocReflection
 
                 Call supplementAssembly(document, asm, assemblyPath, warnings)
             Next
-        Finally
-            ' the collectible context releases the reflection only assemblies
-            context.Unload()
-        End Try
+        End Using
     End Sub
 
-    Private Function loadAssembly(context As AssemblyLoadContext, assemblyPath As String,
+    ''' <summary>
+    ''' build the metadata load context. the resolver whitelist contains every
+    ''' managed library of the runtime folder plus every managed library that
+    ''' sits next to the inspected assemblies (the extracted package content),
+    ''' so the dependency resolution of the inspected assemblies stays inside
+    ''' this closed set and can never fall back to the application directory.
+    ''' </summary>
+    Private Function createMetadataContext(assemblyPaths As IEnumerable(Of String), warnings As List(Of String)) As MetadataLoadContext
+        Dim probe As New List(Of String)(StringComparer.OrdinalIgnoreCase)
+
+        ' the core runtime libraries: they satisfy the well known framework
+        ' references (System.Runtime, netstandard, System.Private.CoreLib, ...)
+        ' of almost every managed assembly.
+        Try
+            Dim runtimeDirectory As String = RuntimeEnvironment.GetRuntimeDirectory()
+
+            If Directory.Exists(runtimeDirectory) Then
+                For Each file As String In Directory.GetFiles(runtimeDirectory, "*.dll")
+                    Call probe.Add(file)
+                Next
+            End If
+        Catch ex As Exception
+            Call appendWarning(warnings, $"the runtime folder could not be probed: {ex.Message}")
+        End Try
+
+        ' the inspected assemblies and their package local dependencies
+        For Each assemblyPath As String In assemblyPaths
+            Dim folder As String = Path.GetDirectoryName(Path.GetFullPath(assemblyPath))
+
+            If Not String.IsNullOrEmpty(folder) AndAlso Directory.Exists(folder) Then
+                For Each file As String In Directory.GetFiles(folder, "*.dll")
+                    Call probe.Add(file)
+                Next
+            End If
+
+            If File.Exists(assemblyPath) Then
+                Call probe.Add(assemblyPath)
+            End If
+        Next
+
+        Dim resolver As New PathAssemblyResolver(probe.Distinct(StringComparer.OrdinalIgnoreCase))
+        Return New MetadataLoadContext(resolver)
+    End Function
+
+    Private Function loadAssembly(context As MetadataLoadContext, assemblyPath As String,
                                   cache As Dictionary(Of String, Assembly), warnings As List(Of String)) As Assembly
 
         Dim cached As Assembly = Nothing
@@ -65,8 +116,7 @@ Public Module DocReflection
         End If
 
         Try
-            Dim bytes As Byte() = File.ReadAllBytes(assemblyPath)
-            Dim asm As Assembly = context.LoadFromStream(New MemoryStream(bytes))
+            Dim asm As Assembly = context.LoadFromAssemblyPath(Path.GetFullPath(assemblyPath))
             cache(assemblyPath) = asm
             Return asm
         Catch ex As Exception

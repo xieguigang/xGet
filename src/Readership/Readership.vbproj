@@ -15,6 +15,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="System.Reflection.MetadataLoadContext" Version="9.0.4" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\..\GCModeller\src\runtime\sciBASIC#\Data_science\Graph\graph-netcore5.vbproj" />
     <ProjectReference Include="..\..\..\GCModeller\src\runtime\sciBASIC#\Data_science\Mathematica\Math\Math\Math.NET5.vbproj" />
     <ProjectReference Include="..\..\..\GCModeller\src\runtime\sciBASIC#\Microsoft.VisualBasic.Core\src\Core.vbproj" />

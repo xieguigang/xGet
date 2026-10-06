@@ -664,6 +664,31 @@
         });
     }
 
+    /* the uploader account row with the official badge: the email is shown
+       in full, the badge only appears for official accounts so that a non
+       official uploader does not add visual noise. */
+    function renderUploader(pkg) {
+        var node = $('pkg-uploader');
+        if (!node) {
+            return;
+        }
+
+        var uploader = pkg.uploader || '';
+
+        if (!uploader) {
+            node.innerHTML = '<span class="mono">—</span>';
+            return;
+        }
+
+        var html = '<span class="mono">' + esc(uploader) + '</span>';
+
+        if (pkg.uploaderOfficial) {
+            html += ' <span class="chip official-badge" title="this account is marked as an official account by the server administrator">&#9733; official</span>';
+        }
+
+        node.innerHTML = html;
+    }
+
     function renderPackageDetail(pkg) {
         document.title = (pkg.id || 'package') + ' · nuget';
 
@@ -715,6 +740,7 @@
         setLink('pkg-repository', pkg.repository, true);
         setLink('pkg-license-url', pkg.licenseUrl, true);
 
+        renderUploader(pkg);
         setText('pkg-authors', pkg.authors || '—');
         setText('pkg-owners', pkg.owners || '—');
         setText('pkg-license', pkg.license || '—');

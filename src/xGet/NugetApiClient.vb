@@ -15,6 +15,13 @@ Public Class ApiResult
     Public Property secret As String
     Public Property id As String
     Public Property version As String
+
+    ''' <summary>
+    ''' an optional machine readable warning code of the response, for example
+    ''' ``mail-not-configured`` when the server can not send the verification
+    ''' email because no smtp account was configured yet.
+    ''' </summary>
+    Public Property warning As String
 End Class
 
 ''' <summary>

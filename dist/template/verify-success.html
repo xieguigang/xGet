@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Email verified</title>
+</head>
+<body style="margin:0;padding:40px 16px;background:#F5F7FB;font-family:'Segoe UI',Helvetica,Arial,sans-serif;">
+  <div style="max-width:640px;margin:0 auto;background:#FFFFFF;border-radius:12px;padding:36px;box-shadow:0 4px 24px rgba(6,46,154,0.08);">
+    <div style="width:52px;height:52px;border-radius:50%;background:#16A34A;color:#FFFFFF;font-size:28px;line-height:52px;text-align:center;">&#10003;</div>
+    <h1 style="margin:18px 0 8px;color:#1F2937;font-size:24px;font-weight:600;">Email verified</h1>
+    <p style="margin:0 0 20px;color:#6B7280;font-size:14px;">the account <b>{{email}}</b> is now active on {{server}}.</p>
+    <p style="margin:0 0 8px;color:#1F2937;font-size:14px;font-weight:500;">copy the base64 authorization code below and save it with xGet:</p>
+    <pre style="margin:0 0 16px;padding:14px;background:#1F2937;color:#D1FAE5;border-radius:8px;font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap;word-break:break-all;">{{payload}}</pre>
+    <p style="margin:0 0 8px;color:#1F2937;font-size:14px;font-weight:500;">then run:</p>
+    <pre style="margin:0 0 20px;padding:14px;background:#F3F4F6;color:#062E9A;border-radius:8px;font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap;word-break:break-all;">{{activate_command}}</pre>
+    <p style="margin:0;color:#9CA3AF;font-size:12px;">keep this code private: it carries your TOTP secret which signs every package upload.</p>
+  </div>
+</body>
+</html>

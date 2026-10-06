@@ -16,6 +16,43 @@ Public Class UserRecord
     Public Property salt As String
     Public Property secretKey As String
     Public Property created As Date
+
+    ''' <summary>
+    ''' whether the account carries the ``official`` badge. every account is a
+    ''' non official account unless an administrator explicitly marks it.
+    ''' </summary>
+    Public Property official As Boolean
+End Class
+
+''' <summary>
+''' one pending email verification registration: the TOTP credentials are
+''' generated at registration time but the account is only created when the
+''' verification link (valid for a limited time window) was visited.
+''' </summary>
+Public Class PendingRegistrationRecord
+    Public Property id As Long
+    Public Property email As String
+    Public Property token As String
+    Public Property salt As String
+    Public Property secret As String
+    Public Property created As Date
+    Public Property expires As Date
+
+    Public ReadOnly Property IsExpired As Boolean
+        Get
+            Return expires <> Date.MinValue AndAlso expires < Date.UtcNow
+        End Get
+    End Property
+End Class
+
+''' <summary>
+''' a generic row snapshot of one database table, used by the ``xConsole``
+''' table browser.
+''' </summary>
+Public Class TableSnapshot
+    Public Property name As String
+    Public Property columns As New List(Of String)
+    Public Property rows As New List(Of String())
 End Class
 
 ''' <summary>
@@ -170,12 +207,27 @@ Public Class NugetStore
     ''' the engine: the host calls it from a low frequency timer so that the wal
     ''' files are merged even when the engine never becomes idle.
     ''' </summary>
+    ''' <param name="force">
+    ''' force the merge even when the engine does not consider a table idle;
+    ''' the ``xConsole db checkpoint`` command uses the forced mode.
+    ''' </param>
     ''' <returns>the number of the merged tables.</returns>
-    Public Function Checkpoint() As Integer
+    Public Function Checkpoint(Optional force As Boolean = False) As Integer
         SyncLock sync
-            Return engine.MergeAll(force:=False)
+            Return engine.MergeAll(force:=force)
         End SyncLock
     End Function
+
+    ''' <summary>
+    ''' the table names of this database which the ``xConsole tables`` browser is
+    ''' allowed to read. every other table name is rejected as a precaution.
+    ''' </summary>
+    Public Shared ReadOnly TableNames As String() = {
+        "users", "packages", "statistics", "package_tags", "package_dependencies",
+        "package_metadata", "package_activity", "package_doc_activity",
+        "package_clusters", "package_api_docs", "user_flags", "package_uploaders",
+        "pending_registrations", "email_blacklist", "server_settings"
+    }
 
     Private Sub initialize()
         SyncLock sync
@@ -273,6 +325,43 @@ Public Class NugetStore
                 "  member_count INT DEFAULT 0," &
                 "  payload LONGTEXT" &
                 ") COMMENT='per package version api comment documents'")
+            Call engine.Execute(
+                "CREATE TABLE IF NOT EXISTS user_flags (" &
+                "  id INT NOT NULL PRIMARY KEY," &
+                "  email VARCHAR(320) NOT NULL," &
+                "  official BOOLEAN DEFAULT FALSE," &
+                "  updated DATETIME" &
+                ") COMMENT='per user admin flags (official badge)'")
+            Call engine.Execute(
+                "CREATE TABLE IF NOT EXISTS package_uploaders (" &
+                "  id INT NOT NULL PRIMARY KEY," &
+                "  package_id VARCHAR(200) NOT NULL," &
+                "  version VARCHAR(100) NOT NULL," &
+                "  email VARCHAR(320) NOT NULL," &
+                "  published DATETIME" &
+                ") COMMENT='the uploader account of a package version'")
+            Call engine.Execute(
+                "CREATE TABLE IF NOT EXISTS pending_registrations (" &
+                "  id INT NOT NULL PRIMARY KEY," &
+                "  email VARCHAR(320) NOT NULL," &
+                "  token VARCHAR(160) NOT NULL," &
+                "  salt VARCHAR(256) NOT NULL," &
+                "  secret VARCHAR(128) NOT NULL," &
+                "  created DATETIME," &
+                "  expires DATETIME" &
+                ") COMMENT='email verification pending registrations'")
+            Call engine.Execute(
+                "CREATE TABLE IF NOT EXISTS email_blacklist (" &
+                "  id INT NOT NULL PRIMARY KEY," &
+                "  domain VARCHAR(255) NOT NULL," &
+                "  created DATETIME" &
+                ") COMMENT='blocked email account domains'")
+            Call engine.Execute(
+                "CREATE TABLE IF NOT EXISTS server_settings (" &
+                "  name VARCHAR(128) NOT NULL PRIMARY KEY," &
+                "  value LONGTEXT," &
+                "  updated DATETIME" &
+                ") COMMENT='server side settings (encrypted mail config etc.)'")
         End SyncLock
     End Sub
 
@@ -380,10 +469,12 @@ Public Class NugetStore
         If String.IsNullOrEmpty(email) Then Return Nothing
 
         SyncLock sync
+            Dim official As HashSet(Of String) = officialEmailsNoLock()
             Dim rs As ResultSet = query($"SELECT id, email, salt, secret, created FROM users")
             For Each row As Object() In rs.Rows
                 Dim record = readUser(rs.Columns, row)
                 If record.email IsNot Nothing AndAlso record.email.Equals(email.Trim(), StringComparison.OrdinalIgnoreCase) Then
+                    record.official = official.Contains(record.email)
                     Return record
                 End If
             Next
@@ -416,15 +507,129 @@ Public Class NugetStore
 
     Public Function ReadAllUsers() As List(Of UserRecord)
         SyncLock sync
+            Dim official As HashSet(Of String) = officialEmailsNoLock()
             Dim rs As ResultSet = query("SELECT id, email, salt, secret, created FROM users")
             Dim list As New List(Of UserRecord)
 
             For Each row As Object() In rs.Rows
-                list.Add(readUser(rs.Columns, row))
+                Dim record = readUser(rs.Columns, row)
+                record.official = official.Contains(record.email)
+                list.Add(record)
             Next
 
             Return list
         End SyncLock
+    End Function
+
+    ''' <summary>
+    ''' delete a user account. the packages that the account uploaded are kept:
+    ''' only the credential record and its admin flags are removed.
+    ''' </summary>
+    Public Function DeleteUser(email As String) As Boolean
+        If String.IsNullOrEmpty(email) Then
+            Return False
+        End If
+
+        SyncLock sync
+            Dim user As UserRecord = GetUser(email)
+
+            If user Is Nothing Then
+                Return False
+            End If
+
+            Call exec($"DELETE FROM users WHERE id = {user.id}")
+            Call exec($"DELETE FROM user_flags WHERE email = '{esc(user.email)}'")
+            Call exec($"DELETE FROM pending_registrations WHERE email = '{esc(user.email)}'")
+            Return True
+        End SyncLock
+    End Function
+
+    ''' <summary>
+    ''' replace the TOTP salt and the derived secret of an existing account (the
+    ''' ``xConsole user reset`` operation).
+    ''' </summary>
+    Public Function UpdateUserSecret(email As String, salt As String, secret As String) As Boolean
+        If String.IsNullOrEmpty(email) Then
+            Return False
+        End If
+
+        SyncLock sync
+            Dim user As UserRecord = GetUser(email)
+
+            If user Is Nothing Then
+                Return False
+            End If
+
+            Call exec($"UPDATE users SET salt = '{esc(salt)}', secret = '{esc(secret)}' WHERE id = {user.id}")
+            Return True
+        End SyncLock
+    End Function
+
+    ''' <summary>
+    ''' test whether the given account carries the ``official`` badge.
+    ''' </summary>
+    Public Function IsUserOfficial(email As String) As Boolean
+        If String.IsNullOrEmpty(email) Then
+            Return False
+        End If
+
+        SyncLock sync
+            Return officialEmailsNoLock().Contains(email.Trim())
+        End SyncLock
+    End Function
+
+    ''' <summary>
+    ''' set (or clear) the ``official`` badge of the given account.
+    ''' </summary>
+    Public Sub SetUserOfficial(email As String, flag As Boolean)
+        If String.IsNullOrEmpty(email) Then
+            Return
+        End If
+
+        email = email.Trim()
+
+        SyncLock sync
+            Dim rs As ResultSet = query($"SELECT id, email FROM user_flags WHERE official = TRUE")
+            Dim foundId As Long = -1
+
+            If rs IsNot Nothing AndAlso rs.IsQuery Then
+                For Each row As Object() In rs.Rows
+                    If String.Equals(toStr(row(1)), email, StringComparison.OrdinalIgnoreCase) Then
+                        foundId = toLong(row(0))
+                        Exit For
+                    End If
+                Next
+            End If
+
+            If foundId >= 0 Then
+                Call exec($"UPDATE user_flags SET official = {If(flag, "TRUE", "FALSE")}, updated = {dateLiteral(Date.UtcNow)} WHERE id = {foundId}")
+            ElseIf flag Then
+                Dim id As Long = nextId("user_flags")
+                Call exec($"INSERT INTO user_flags (id, email, official, updated) VALUES ({id}, '{esc(email.ToLowerInvariant())}', TRUE, {dateLiteral(Date.UtcNow)})")
+            End If
+        End SyncLock
+    End Sub
+
+    ''' <summary>
+    ''' read the set of the ``official`` marked accounts (lower case emails).
+    ''' </summary>
+    Public Function GetOfficialEmails() As HashSet(Of String)
+        SyncLock sync
+            Return officialEmailsNoLock()
+        End SyncLock
+    End Function
+
+    Private Function officialEmailsNoLock() As HashSet(Of String)
+        Dim set_ As New HashSet(Of String)(StringComparer.OrdinalIgnoreCase)
+        Dim rs As ResultSet = query("SELECT email FROM user_flags WHERE official = TRUE")
+
+        If rs IsNot Nothing AndAlso rs.IsQuery Then
+            For Each row As Object() In rs.Rows
+                Call set_.Add(toStr(row(0)))
+            Next
+        End If
+
+        Return set_
     End Function
 
     Private Shared Function readUser(columns As List(Of String), row As Object()) As UserRecord
@@ -1352,6 +1557,370 @@ Public Class NugetStore
         Next
 
         Return record
+    End Function
+
+#End Region
+
+#Region "package uploaders"
+
+    ''' <summary>
+    ''' record the uploader account of one package version.
+    ''' </summary>
+    Public Sub RecordUploader(packageId As String, version As String, email As String)
+        If String.IsNullOrEmpty(packageId) OrElse String.IsNullOrEmpty(version) OrElse String.IsNullOrEmpty(email) Then
+            Return
+        End If
+
+        SyncLock sync
+            Call exec($"DELETE FROM package_uploaders WHERE package_id = '{esc(packageId)}' AND version = '{esc(version)}'")
+
+            Dim id As Long = nextId("package_uploaders")
+            Call exec(
+                "INSERT INTO package_uploaders (id, package_id, version, email, published) VALUES (" &
+                $"{id}, '{esc(packageId)}', '{esc(version)}', '{esc(email.Trim())}', {dateLiteral(Date.UtcNow)})")
+        End SyncLock
+    End Sub
+
+    ''' <summary>
+    ''' read the uploader account of one package version; returns an empty
+    ''' string when the version was uploaded before the uploader tracking was
+    ''' introduced.
+    ''' </summary>
+    Public Function GetUploader(packageId As String, version As String) As String
+        SyncLock sync
+            Dim rs As ResultSet = query($"SELECT package_id, version, email FROM package_uploaders WHERE package_id = '{esc(packageId)}'")
+
+            If rs IsNot Nothing AndAlso rs.IsQuery Then
+                For Each row As Object() In rs.Rows
+                    If String.Equals(toStr(row(1)), version, StringComparison.OrdinalIgnoreCase) Then
+                        Return toStr(row(2))
+                    End If
+                Next
+            End If
+        End SyncLock
+
+        Return ""
+    End Function
+
+    ''' <summary>
+    ''' read the uploader account of the latest recorded version of a package.
+    ''' </summary>
+    Public Function GetPackageUploader(packageId As String) As String
+        Dim best As String = ""
+        Dim bestVersion As String = ""
+
+        SyncLock sync
+            Dim rs As ResultSet = query($"SELECT version, email FROM package_uploaders WHERE package_id = '{esc(packageId)}'")
+
+            If rs IsNot Nothing AndAlso rs.IsQuery Then
+                For Each row As Object() In rs.Rows
+                    Dim v As String = toStr(row(0))
+
+                    If bestVersion = "" OrElse VersionKey(v) > VersionKey(bestVersion) Then
+                        bestVersion = v
+                        best = toStr(row(1))
+                    End If
+                Next
+            End If
+        End SyncLock
+
+        Return best
+    End Function
+
+#End Region
+
+#Region "pending registrations (email verification)"
+
+    ''' <summary>
+    ''' insert one pending email verification registration.
+    ''' </summary>
+    Public Function CreatePendingRegistration(email As String, token As String,
+                                              salt As String, secret As String,
+                                              expires As Date) As PendingRegistrationRecord
+        Dim record As New PendingRegistrationRecord
+
+        SyncLock sync
+            Dim id As Long = nextId("pending_registrations")
+            Dim now As Date = Date.UtcNow
+
+            Call exec(
+                "INSERT INTO pending_registrations (id, email, token, salt, secret, created, expires) VALUES (" &
+                $"{id}, '{esc(email.Trim().ToLowerInvariant())}', '{esc(token)}', '{esc(salt)}', '{esc(secret)}', {dateLiteral(now)}, {dateLiteral(expires)})")
+
+            record.id = id
+            record.email = email
+            record.token = token
+            record.salt = salt
+            record.secret = secret
+            record.created = now
+            record.expires = expires
+        End SyncLock
+
+        Return record
+    End Function
+
+    ''' <summary>
+    ''' look up a pending registration by its verification token.
+    ''' </summary>
+    Public Function GetPendingRegistration(token As String) As PendingRegistrationRecord
+        If String.IsNullOrEmpty(token) Then
+            Return Nothing
+        End If
+
+        SyncLock sync
+            Dim rs As ResultSet = query($"SELECT id, email, token, salt, secret, created, expires FROM pending_registrations WHERE token = '{esc(token)}'")
+
+            If rs Is Nothing OrElse Not rs.IsQuery Then
+                Return Nothing
+            End If
+
+            For Each row As Object() In rs.Rows
+                If String.Equals(toStr(row(2)), token, StringComparison.Ordinal) Then
+                    Return New PendingRegistrationRecord With {
+                        .id = toLong(row(0)),
+                        .email = toStr(row(1)),
+                        .token = toStr(row(2)),
+                        .salt = toStr(row(3)),
+                        .secret = toStr(row(4)),
+                        .created = toDate(row(5)),
+                        .expires = toDate(row(6))
+                    }
+                End If
+            Next
+        End SyncLock
+
+        Return Nothing
+    End Function
+
+    ''' <summary>
+    ''' remove one pending registration row (after it was consumed by a
+    ''' successful verification).
+    ''' </summary>
+    Public Sub DeletePendingRegistration(id As Long)
+        SyncLock sync
+            Call exec($"DELETE FROM pending_registrations WHERE id = {id}")
+        End SyncLock
+    End Sub
+
+    ''' <summary>
+    ''' remove every pending registration whose verification link has expired.
+    ''' </summary>
+    Public Sub DeleteExpiredRegistrations()
+        SyncLock sync
+            Dim rs As ResultSet = query("SELECT id, expires FROM pending_registrations")
+
+            If rs Is Nothing OrElse Not rs.IsQuery Then
+                Return
+            End If
+
+            For Each row As Object() In rs.Rows
+                If toDate(row(1)) < Date.UtcNow Then
+                    Call exec($"DELETE FROM pending_registrations WHERE id = {toLong(row(0))}")
+                End If
+            Next
+        End SyncLock
+    End Sub
+
+#End Region
+
+#Region "email domain blacklist"
+
+    ''' <summary>
+    ''' add one email account domain to the registration blacklist. the domain
+    ''' is stored in its lower case form without a leading ``@``.
+    ''' </summary>
+    Public Function AddBlacklistDomain(domain As String) As Boolean
+        domain = normalizeDomain(domain)
+
+        If domain.StringEmpty() Then
+            Return False
+        End If
+
+        SyncLock sync
+            If GetBlacklistDomains().Contains(domain) Then
+                Return False
+            End If
+
+            Dim id As Long = nextId("email_blacklist")
+            Call exec($"INSERT INTO email_blacklist (id, domain, created) VALUES ({id}, '{esc(domain)}', {dateLiteral(Date.UtcNow)})")
+            Return True
+        End SyncLock
+    End Function
+
+    ''' <summary>
+    ''' remove one email account domain from the registration blacklist.
+    ''' </summary>
+    Public Function RemoveBlacklistDomain(domain As String) As Boolean
+        domain = normalizeDomain(domain)
+
+        If domain.StringEmpty() Then
+            Return False
+        End If
+
+        SyncLock sync
+            Dim removed As Boolean = False
+
+            For Each item As String In GetBlacklistDomains()
+                If String.Equals(item, domain, StringComparison.OrdinalIgnoreCase) Then
+                    Call exec($"DELETE FROM email_blacklist WHERE domain = '{esc(item)}'")
+                    removed = True
+                End If
+            Next
+
+            Return removed
+        End SyncLock
+    End Function
+
+    ''' <summary>
+    ''' read every blacklisted email account domain.
+    ''' </summary>
+    Public Function GetBlacklistDomains() As List(Of String)
+        Dim list As New List(Of String)
+
+        SyncLock sync
+            Dim rs As ResultSet = query("SELECT domain FROM email_blacklist")
+
+            If rs IsNot Nothing AndAlso rs.IsQuery Then
+                For Each row As Object() In rs.Rows
+                    Dim domain As String = toStr(row(0))
+
+                    If Not domain.StringEmpty() Then
+                        Call list.Add(domain)
+                    End If
+                Next
+            End If
+        End SyncLock
+
+        Return list
+    End Function
+
+    ''' <summary>
+    ''' test whether the domain part of the given email address is blacklisted.
+    ''' </summary>
+    Public Function IsEmailBlacklisted(email As String) As Boolean
+        Dim domain As String = domainOf(email)
+        Return Not domain.StringEmpty() AndAlso GetBlacklistDomains().Contains(domain)
+    End Function
+
+    Private Shared Function domainOf(email As String) As String
+        Dim text As String = If(email, "").Trim()
+        Dim index As Integer = text.LastIndexOf("@"c)
+
+        If index < 0 OrElse index = text.Length - 1 Then
+            Return ""
+        End If
+
+        Return text.Substring(index + 1).Trim().ToLowerInvariant()
+    End Function
+
+    Private Shared Function normalizeDomain(domain As String) As String
+        Dim text As String = If(domain, "").Trim().TrimStart("@"c).ToLowerInvariant()
+        Return text
+    End Function
+
+#End Region
+
+#Region "server settings"
+
+    ''' <summary>
+    ''' read one server side setting value; returns <c>Nothing</c> when the
+    ''' setting was never stored.
+    ''' </summary>
+    Public Function GetSetting(name As String) As String
+        If String.IsNullOrEmpty(name) Then
+            Return Nothing
+        End If
+
+        SyncLock sync
+            Dim rs As ResultSet = query($"SELECT name, value FROM server_settings WHERE name = '{esc(name)}'")
+
+            If rs Is Nothing OrElse Not rs.IsQuery OrElse rs.Rows.Count = 0 Then
+                Return Nothing
+            End If
+
+            Dim index As Integer = rs.Columns.FindIndex(Function(c) c.Equals("value", StringComparison.OrdinalIgnoreCase))
+            If index < 0 Then
+                Return Nothing
+            End If
+
+            Return toStr(rs.Rows(0)(index))
+        End SyncLock
+    End Function
+
+    ''' <summary>
+    ''' insert or update one server side setting value.
+    ''' </summary>
+    Public Sub SetSetting(name As String, value As String)
+        If String.IsNullOrEmpty(name) Then
+            Return
+        End If
+
+        SyncLock sync
+            Dim rs As ResultSet = query($"SELECT name FROM server_settings WHERE name = '{esc(name)}'")
+
+            If rs IsNot Nothing AndAlso rs.IsQuery AndAlso rs.Rows.Count > 0 Then
+                Call exec($"UPDATE server_settings SET value = '{esc(value)}', updated = {dateLiteral(Date.UtcNow)} WHERE name = '{esc(name)}'")
+            Else
+                Call exec($"INSERT INTO server_settings (name, value, updated) VALUES ('{esc(name)}', '{esc(value)}', {dateLiteral(Date.UtcNow)})")
+            End If
+        End SyncLock
+    End Sub
+
+    ''' <summary>
+    ''' remove one server side setting.
+    ''' </summary>
+    Public Sub DeleteSetting(name As String)
+        If String.IsNullOrEmpty(name) Then
+            Return
+        End If
+
+        SyncLock sync
+            Call exec($"DELETE FROM server_settings WHERE name = '{esc(name)}'")
+        End SyncLock
+    End Sub
+
+#End Region
+
+#Region "table browser (xConsole)"
+
+    ''' <summary>
+    ''' read the full row set of one database table for the ``xConsole tables``
+    ''' browser. only the names of the <see cref="TableNames"/> whitelist are
+    ''' accepted; every other name returns <c>Nothing</c>.
+    ''' </summary>
+    Public Function ReadTable(tableName As String) As TableSnapshot
+        If String.IsNullOrEmpty(tableName) Then
+            Return Nothing
+        End If
+
+        Dim name As String = tableName.Trim().ToLowerInvariant()
+
+        If Not TableNames.Contains(name) Then
+            Return Nothing
+        End If
+
+        SyncLock sync
+            Dim rs As ResultSet = query($"SELECT * FROM {name}")
+
+            If rs Is Nothing OrElse Not rs.IsQuery Then
+                Return Nothing
+            End If
+
+            Dim snapshot As New TableSnapshot With {.name = name}
+            snapshot.columns.AddRange(rs.Columns)
+
+            For Each row As Object() In rs.Rows
+                Dim cells As New List(Of String)
+
+                For Each cell As Object In row
+                    Call cells.Add(toStr(cell))
+                Next
+
+                snapshot.rows.Add(cells.ToArray())
+            Next
+
+            Return snapshot
+        End SyncLock
     End Function
 
 #End Region

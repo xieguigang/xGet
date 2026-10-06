@@ -473,6 +473,15 @@ Public Class Service
 
     <HttpPost("/api/register")>
     Public Sub RegisterUser(req As HttpPOSTRequest, res As HttpResponse)
+        ' ---- registration switch ----
+        If Not config.RegistrationEnabled Then
+            Call "registration rejected: the registration is disabled".warning()
+            writeResult(res, False, "the user registration is disabled on this server.", New Dictionary(Of String, Object) From {
+                {"warning", "registration-disabled"}
+            })
+            Return
+        End If
+
         Dim email As String = argument(req, "email")
 
         If String.IsNullOrEmpty(email) Then
@@ -480,20 +489,141 @@ Public Class Service
             Return
         End If
 
-        Dim user As UserRecord = auth.Register(email)
-
-        If user Is Nothing Then
-            res.WriteError(HTTP_RFC.RFC_INTERNAL_SERVER_ERROR, "failed to register the user")
+        ' ---- email account domain blacklist ----
+        If store.IsEmailBlacklisted(email) Then
+            Call $"registration rejected: the domain of '{email}' is blacklisted".warning()
+            writeResult(res, False, "the domain of this email address is blacklisted on this server and can not be registered.",
+                        New Dictionary(Of String, Object) From {
+                {"warning", "domain-blacklisted"}
+            })
             Return
         End If
 
-        Call writeResult(res, True, $"registered {user.email}", New Dictionary(Of String, Object) From {
-            {"email", user.email},
-            {"secret", user.secretKey},
-            {"issuer", "nuget"},
-            {"otpauth", TotpModule.BuildOtpAuthUri(user.secretKey, user.email, "nuget")}
+        ' ---- a usable smtp configuration is required for the verification flow ----
+        If Not MailService.IsConfigured(store, config.DataDirectory) Then
+            Call "registration rejected: the mail server is not configured".warning()
+            writeResult(res, False, "the mail server is not configured on this server, so the verification email can not be sent. " &
+                                    "please remind the server administrator to configure the mail server (xConsole mail set).",
+                        New Dictionary(Of String, Object) From {
+                {"warning", "mail-not-configured"}
+            })
+            Return
+        End If
+
+        ' an already verified account is never registered twice: the TOTP secret
+        ' is never returned over the wire anymore.
+        If store.GetUser(email) IsNot Nothing Then
+            writeResult(res, True, "this email address is already registered on this server.", New Dictionary(Of String, Object) From {
+                {"warning", "already-registered"}
+            })
+            Return
+        End If
+
+        ' ---- create the pending registration and send the verification mail ----
+        Call store.DeleteExpiredRegistrations()
+
+        Dim salt As String = TotpAuth.GenerateSalt(TotpAuth.SaltLength)
+        Dim secret As String = TotpModule.Base32Encode(TotpAuth.DeriveSecret(email, salt))
+        Dim token As String = generateToken()
+        Dim expires As Date = Date.UtcNow.AddMinutes(config.VerifyTtlMinutes)
+
+        Call store.CreatePendingRegistration(email, token, salt, secret, expires)
+
+        Dim serverUrl As String = getBaseUrl(req)
+        Dim verifyUrl As String = $"{serverUrl}/api/verify?token={Uri.EscapeDataString(token)}"
+        Dim body As String = MailService.RenderVerifyEmail(config.TemplateDirectory, email, verifyUrl, serverUrl, config.VerifyTtlMinutes)
+        Dim mailError As String = ""
+
+        If Not MailService.Send(MailService.LoadConfig(store, config.DataDirectory), email,
+                                $"verify your email address on {serverUrl}", body, mailError) Then
+            Call $"the verification mail to '{email}' could not be sent: {mailError}".warning()
+            res.WriteError(HTTP_RFC.RFC_INTERNAL_SERVER_ERROR, $"the verification email could not be sent: {mailError}")
+            Return
+        End If
+
+        Call $"a verification mail was sent to '{email}' (valid for {config.VerifyTtlMinutes} minutes)".info()
+
+        writeResult(res, True, $"a verification link has been sent to {email}; the link is valid for {config.VerifyTtlMinutes} minutes. " &
+                               "open the link, then save the base64 authorization code with 'xGet activate'.",
+                    New Dictionary(Of String, Object) From {
+            {"email", email},
+            {"warning", "check-your-mailbox"}
         })
     End Sub
+
+    ''' <summary>
+    ''' the email verification endpoint of the registration flow: the link is
+    ''' sent by mail and is valid for a limited time window. when the token is
+    ''' valid, the pending registration becomes a real account and the page
+    ''' displays the base64 authorization code (email + server url + TOTP
+    ''' secret) which the new user saves locally through ``xGet activate``.
+    ''' </summary>
+    <HttpGet("/api/verify")>
+    Public Sub VerifyEmail(req As HttpRequest, res As HttpResponse)
+        Dim token As String = queryValue(req, "token")
+
+        If token.StringEmpty() Then
+            Call writeHtml(res, MailService.RenderVerifyFailed(config.TemplateDirectory, "the verification link is invalid: the token is missing."))
+            Return
+        End If
+
+        Dim pending As PendingRegistrationRecord = store.GetPendingRegistration(token)
+
+        If pending Is Nothing Then
+            Call "email verification failed: the token was not found".warning()
+            Call writeHtml(res, MailService.RenderVerifyFailed(config.TemplateDirectory,
+                "the verification link is invalid or it was already used."))
+            Return
+        End If
+
+        If pending.IsExpired Then
+            Call store.DeletePendingRegistration(pending.id)
+            Call $"email verification failed: the token of '{pending.email}' has expired".warning()
+            Call writeHtml(res, MailService.RenderVerifyFailed(config.TemplateDirectory,
+                "the verification link has expired (the validity window is 30 minutes)."))
+            Return
+        End If
+
+        ' the pending registration becomes a real account
+        If store.GetUser(pending.email) Is Nothing Then
+            Call store.CreateUser(pending.email, pending.salt, pending.secret)
+            Call $"a new account was verified and activated: {pending.email}".info()
+        End If
+
+        Call store.DeletePendingRegistration(pending.id)
+        Call store.DeleteExpiredRegistrations()
+
+        ' the base64 authorization payload: email + server url + totp secret
+        Dim serverUrl As String = getBaseUrl(req)
+        Dim payloadJson As String = JsonSerializer.Serialize(New Dictionary(Of String, String) From {
+            {"email", pending.email},
+            {"server", serverUrl},
+            {"secret", pending.secret}
+        }, JsonOptions)
+        Dim payload As String = Convert.ToBase64String(Encoding.UTF8.GetBytes(payloadJson))
+        Dim activateCommand As String = $"xGet activate --server {serverUrl} --email {pending.email} --code {payload}"
+
+        Call writeHtml(res, MailService.RenderVerifySuccess(config.TemplateDirectory, pending.email, payload, activateCommand, serverUrl))
+    End Sub
+
+    ''' <summary>
+    ''' a cryptographically secure random 256 bit hex verification token.
+    ''' </summary>
+    Private Shared Function generateToken() As String
+        Dim buffer(31) As Byte
+
+        Using rng As RandomNumberGenerator = RandomNumberGenerator.Create()
+            rng.GetBytes(buffer)
+        End Using
+
+        Dim sb As New StringBuilder(buffer.Length * 2)
+
+        For Each b As Byte In buffer
+            sb.Append(b.ToString("x2"))
+        Next
+
+        Return sb.ToString()
+    End Function
 
     <HttpPost("/api/v2/package")>
     Public Sub UploadCustom(req As HttpPOSTRequest, res As HttpResponse)
@@ -536,6 +666,14 @@ Public Class Service
         Try
             Call upload.SaveAs(temp)
 
+            ' ---- upload size limit ----
+            Dim sizeMB As Double = New FileInfo(temp).Length / 1048576.0
+
+            If sizeMB > config.MaxUploadMB Then
+                res.WriteError(HTTP_RFC.RFC_BAD_REQUEST, $"the package size ({sizeMB:0.#} MB) exceeds the configured upload limit of {config.MaxUploadMB:0.#} MB")
+                Return
+            End If
+
             Dim metadata As NupkgMetadata
             Try
                 metadata = NupkgReader.ReadMetadata(temp)
@@ -547,6 +685,15 @@ Public Class Service
 
             If String.IsNullOrEmpty(metadata.Id) OrElse String.IsNullOrEmpty(metadata.Version) Then
                 res.WriteError(HTTP_RFC.RFC_BAD_REQUEST, "invalid nuspec: the id or version is missing")
+                Return
+            End If
+
+            ' ---- package content validation: only managed clr library packages ----
+            Dim rejectReason As String = ""
+
+            If Not PackageValidator.Validate(temp, rejectReason) Then
+                Call $"package rejected: {metadata.Id} {metadata.Version}: {rejectReason}".warning()
+                res.WriteError(HTTP_RFC.RFC_BAD_REQUEST, rejectReason)
                 Return
             End If
 
@@ -577,6 +724,7 @@ Public Class Service
             Call File.Copy(temp, nupkgFilePath(pkg), overwrite:=True)
             Call File.WriteAllText(nuspecFilePath(pkg), NupkgReader.ReadNuspecXml(temp))
             Call store.AddPackage(pkg)
+            Call store.RecordUploader(pkg.package_id, pkg.version, email)
             Call registerStaticFiles(pkg)
             Call indexPackage(pkg, metadata)
             Call refreshStatistics()
@@ -708,6 +856,17 @@ Public Class Service
         Next
 
         Dim metadata As Dictionary(Of String, String) = store.GetPackageMetadata(latest.package_id)
+
+        ' the uploader account of this package version (falls back to the latest
+        ' recorded version of the package) and its official badge state
+        Dim uploader As String = store.GetUploader(latest.package_id, latest.version)
+
+        If uploader.StringEmpty() Then
+            uploader = store.GetPackageUploader(latest.package_id)
+        End If
+
+        Dim uploaderOfficial As Boolean = store.IsUserOfficial(uploader)
+
         Dim iconFile As String = ""
         If metadata.TryGetValue("iconFile", iconFile) AndAlso Not String.IsNullOrEmpty(iconFile) Then
             ' the icon is served by the controller endpoint
@@ -757,6 +916,8 @@ Public Class Service
             {"selectedVersion", latest.version},
             {"totalDownloads", versions.Sum(Function(v) v.downloads)},
             {"published", isoDate(latest.published)},
+            {"uploader", uploader},
+            {"uploaderOfficial", uploaderOfficial},
             {"iconUrl", If(String.IsNullOrEmpty(iconFile), "", $"{baseUrl}/api/icon/{Uri.EscapeDataString(latest.package_id)}")},
             {"readme", readmeInfo(baseUrl, latest)},
             {"docs", docsInfo(latest)},
@@ -1410,13 +1571,13 @@ Public Class Service
 
         ' extract the embedded icon image so that it can be served on the web page
         If Not String.IsNullOrEmpty(metadata.Icon) Then
-            Dim extension As String = Path.GetExtension(metadata.Icon)
-            If String.IsNullOrEmpty(extension) Then
-                extension = ".png"
-            End If
-
+            ' the extension is resolved against a whitelist: a hostile nuspec
+            ' value can never control the extracted file name
+            Dim extension As String = NupkgReader.SafeExtension(metadata.Icon, NupkgReader.IconExtensions, ".png")
             Dim iconPath As String = Path.Combine(versionDirectory(pkg), "icon" & extension)
-            If NupkgReader.ExtractIcon(nupkgFilePath(pkg), metadata.Icon, iconPath) Then
+
+            If NupkgReader.ExtractIcon(nupkgFilePath(pkg), metadata.Icon, iconPath,
+                                       New ZipExtractionLimits(config.ZipMaxEntryMB, config.ZipMaxTotalMB, config.ZipMaxEntries)) Then
                 values("iconFile") = "icon" & extension
             End If
         End If
@@ -1425,15 +1586,12 @@ Public Class Service
         ' render it later on. the text itself is not stored in the database
         ' because the JSql string literal escaping flattens the line breaks.
         If Not String.IsNullOrEmpty(metadata.Readme) Then
-            Dim readmeExtension As String = Path.GetExtension(metadata.Readme)
-            If String.IsNullOrEmpty(readmeExtension) Then
-                readmeExtension = ".md"
-            End If
-
+            Dim readmeExtension As String = NupkgReader.SafeExtension(metadata.Readme, NupkgReader.ReadmeExtensions, ".md")
             Dim readmeFile As String = "readme" & readmeExtension.ToLowerInvariant()
             Dim readmePath As String = Path.Combine(versionDirectory(pkg), readmeFile)
 
-            If NupkgReader.ExtractEntry(nupkgFilePath(pkg), metadata.Readme, readmePath) Then
+            If NupkgReader.ExtractEntry(nupkgFilePath(pkg), metadata.Readme, readmePath,
+                                        New ZipExtractionLimits(config.ZipMaxEntryMB, config.ZipMaxTotalMB, config.ZipMaxEntries)) Then
                 values("readme") = metadata.Readme
                 values("readmeFile") = readmeFile
                 values("readmeFormat") = readmeExtension.TrimStart("."c).ToLowerInvariant()
@@ -1465,7 +1623,7 @@ Public Class Service
         Try
             Dim warnings As New List(Of String)
             Dim records As List(Of PackageApiDocRecord) = PackageApiDocs.Extract(
-                nupkgFilePath(pkg), pkg.package_id, pkg.version, warnings)
+                nupkgFilePath(pkg), pkg.package_id, pkg.version, warnings, config.ApiDocWorkerTimeoutSeconds)
 
             Call store.ReplacePackageApiDocs(pkg.package_id, pkg.version, records)
 

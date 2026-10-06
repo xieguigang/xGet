@@ -139,6 +139,52 @@ Public Class NugetConfiguration
     ''' </summary>
     Public ReadOnly Property DbCheckpointSeconds As Integer
 
+    ''' <summary>
+    ''' whether new user accounts may be registered. configuration key
+    ''' ``registration-enabled``, default True. when it is disabled the
+    ''' ``/api/register`` endpoint rejects every registration request.
+    ''' </summary>
+    Public ReadOnly Property RegistrationEnabled As Boolean
+
+    ''' <summary>
+    ''' the maximum accepted size of one uploaded nupkg file in megabytes.
+    ''' configuration key ``max-upload-mb``, default 200.
+    ''' </summary>
+    Public ReadOnly Property MaxUploadMB As Double
+
+    ''' <summary>
+    ''' the maximum uncompressed size of one zip entry in megabytes.
+    ''' configuration key ``zip-max-entry-mb``, default 64.
+    ''' </summary>
+    Public ReadOnly Property ZipMaxEntryMB As Double
+
+    ''' <summary>
+    ''' the maximum total uncompressed size of all entries which are extracted
+    ''' from one package, in megabytes. configuration key
+    ''' ``zip-max-total-mb``, default 512.
+    ''' </summary>
+    Public ReadOnly Property ZipMaxTotalMB As Double
+
+    ''' <summary>
+    ''' the maximum number of entries which are extracted from one package.
+    ''' configuration key ``zip-max-entries``, default 2048.
+    ''' </summary>
+    Public ReadOnly Property ZipMaxEntries As Integer
+
+    ''' <summary>
+    ''' the hard timeout in seconds of the ``ApiDocWorker`` child process which
+    ''' extracts the api comment documents of one uploaded package. the worker
+    ''' process is killed when it exceeds the timeout. configuration key
+    ''' ``apidoc-timeout-seconds``, default 120.
+    ''' </summary>
+    Public ReadOnly Property ApiDocWorkerTimeoutSeconds As Integer
+
+    ''' <summary>
+    ''' the validity window in minutes of the email verification link of a new
+    ''' registration. configuration key ``verify-ttl-minutes``, default 30.
+    ''' </summary>
+    Public ReadOnly Property VerifyTtlMinutes As Integer
+
     Public Const DefaultClusterK As Integer = 6
     Public Const DefaultClusterIntervalMinutes As Integer = 30
     Public Const DefaultClusterMinSamples As Integer = 3
@@ -151,12 +197,22 @@ Public Class NugetConfiguration
     Public Const DefaultSitemapIdleSeconds As Integer = 60
     Public Const DefaultSitemapIntervalSeconds As Integer = 300
 
+    Public Const DefaultMaxUploadMB As Double = 200
+    Public Const DefaultZipMaxEntryMB As Double = 64
+    Public Const DefaultZipMaxTotalMB As Double = 512
+    Public Const DefaultZipMaxEntries As Integer = 2048
+    Public Const DefaultApiDocWorkerTimeoutSeconds As Integer = 120
+    Public Const DefaultVerifyTtlMinutes As Integer = 30
+
     Private Sub New(data As String, packages As String, database As String, wwwroot As String, template As String, baseUrl As String,
                     tmp As String, sitemapEnabled As Boolean, sitemapBaseUrl As String,
                     sitemapIdleSeconds As Integer, sitemapIntervalSeconds As Integer,
                     clusterEnabled As Boolean, clusterK As Integer, clusterIntervalMinutes As Integer,
                     clusterMinSamples As Integer, clusterNeighbors As Integer,
-                    dbMergeIdleSeconds As Integer, dbMergeOperations As Integer, dbCheckpointSeconds As Integer)
+                    dbMergeIdleSeconds As Integer, dbMergeOperations As Integer, dbCheckpointSeconds As Integer,
+                    registrationEnabled As Boolean, maxUploadMB As Double,
+                    zipMaxEntryMB As Double, zipMaxTotalMB As Double, zipMaxEntries As Integer,
+                    apiDocWorkerTimeoutSeconds As Integer, verifyTtlMinutes As Integer)
 
         Me.DataDirectory = data
         Me.PackageDirectory = packages
@@ -177,6 +233,13 @@ Public Class NugetConfiguration
         Me.DbMergeIdleSeconds = dbMergeIdleSeconds
         Me.DbMergeOperations = dbMergeOperations
         Me.DbCheckpointSeconds = dbCheckpointSeconds
+        Me.RegistrationEnabled = registrationEnabled
+        Me.MaxUploadMB = maxUploadMB
+        Me.ZipMaxEntryMB = zipMaxEntryMB
+        Me.ZipMaxTotalMB = zipMaxTotalMB
+        Me.ZipMaxEntries = zipMaxEntries
+        Me.ApiDocWorkerTimeoutSeconds = apiDocWorkerTimeoutSeconds
+        Me.VerifyTtlMinutes = verifyTtlMinutes
     End Sub
 
     ''' <summary>
@@ -275,7 +338,37 @@ Public Class NugetConfiguration
             intValue(config, "cluster-neighbors", DefaultClusterNeighbors, 2, 256),
             intValue(config, "db-merge-idle-seconds", DefaultDbMergeIdleSeconds, 5, 3600),
             intValue(config, "db-merge-operations", DefaultDbMergeOperations, 1, 1000000),
-            intValue(config, "db-checkpoint-seconds", DefaultDbCheckpointSeconds, 30, 86400))
+            intValue(config, "db-checkpoint-seconds", DefaultDbCheckpointSeconds, 30, 86400),
+            boolValue(config, "registration-enabled", True),
+            doubleValue(config, "max-upload-mb", DefaultMaxUploadMB, 1, 4096),
+            doubleValue(config, "zip-max-entry-mb", DefaultZipMaxEntryMB, 1, 2048),
+            doubleValue(config, "zip-max-total-mb", DefaultZipMaxTotalMB, 1, 16384),
+            intValue(config, "zip-max-entries", DefaultZipMaxEntries, 8, 65536),
+            intValue(config, "apidoc-timeout-seconds", DefaultApiDocWorkerTimeoutSeconds, 10, 3600),
+            intValue(config, "verify-ttl-minutes", DefaultVerifyTtlMinutes, 5, 1440))
+    End Function
+
+    ''' <summary>
+    ''' read a floating point configuration value, clamped to the given inclusive
+    ''' range so that an invalid value can never break the runtime.
+    ''' </summary>
+    Private Shared Function doubleValue(config As IReadOnlyDictionary(Of String, String), name As String,
+                                        fallback As Double, min As Double, max As Double) As Double
+        Dim value As String = getValue(config, name)
+        Dim parsed As Double
+
+        If String.IsNullOrEmpty(value) OrElse
+           Not Double.TryParse(value.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, parsed) Then
+            Return fallback
+        End If
+
+        If parsed < min Then
+            Return min
+        ElseIf parsed > max Then
+            Return max
+        Else
+            Return parsed
+        End If
     End Function
 
     Private Shared Function getValue(config As IReadOnlyDictionary(Of String, String), name As String) As String
