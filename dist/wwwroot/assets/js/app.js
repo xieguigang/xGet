@@ -679,9 +679,9 @@
         });
     }
 
-    /* the uploader account row with the official badge: the email is shown
-       in full, the badge only appears for official accounts so that a non
-       official uploader does not add visual noise. */
+    /* the uploader account row: the email links to the user profile page and
+       the badges only appear for the accounts that carry a flag, so that a
+       plain uploader does not add visual noise. */
     function renderUploader(pkg) {
         var node = $('pkg-uploader');
         if (!node) {
@@ -695,10 +695,19 @@
             return;
         }
 
-        var html = '<span class="mono">' + esc(uploader) + '</span>';
+        var userUrl = 'user.html?email=' + encodeURIComponent(uploader);
+        var html = '<a class="mono user-link" href="' + esc(userUrl) + '" title="open the profile of this uploader">' + esc(uploader) + '</a>';
 
         if (pkg.uploaderOfficial) {
             html += ' <span class="chip official-badge" title="this account is marked as an official account by the server administrator">&#9733; official</span>';
+        }
+
+        if (pkg.uploaderDemo) {
+            html += ' <span class="chip demo-badge" title="this account is marked as a demo account by the server administrator">demo</span>';
+        }
+
+        if (pkg.uploaderBanned) {
+            html += ' <span class="chip banned-badge" title="this account is banned: its upload requests are rejected by the server">&#9940; banned</span>';
         }
 
         node.innerHTML = html;
