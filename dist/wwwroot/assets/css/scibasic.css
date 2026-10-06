@@ -843,6 +843,77 @@ a.chip:hover {
     user-select: none;
 }
 
+/* the demo account badge (amber) */
+.demo-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border: 1px solid var(--gold);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--gold) 12%, transparent);
+    color: var(--gold);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    line-height: 1.5;
+    white-space: nowrap;
+    user-select: none;
+}
+
+/* the banned account badge (red) */
+.banned-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border: 1px solid var(--warn);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--warn) 12%, transparent);
+    color: var(--warn);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    line-height: 1.5;
+    white-space: nowrap;
+    user-select: none;
+}
+
+/* the uploader email link of the package facts row */
+.user-link {
+    color: var(--ink);
+    text-decoration: none;
+    border-bottom: 1px dashed var(--ink-ghost);
+}
+
+.user-link:hover {
+    color: var(--green);
+    border-bottom-color: var(--green);
+}
+
+/* the headline of the user profile page */
+.user-email {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 6px;
+    overflow-wrap: anywhere;
+}
+
+.user-meta {
+    margin-bottom: 8px;
+    color: var(--ink-ghost);
+    font-size: 12px;
+}
+
+/* the reverse dependency entry below the package dependency list */
+.dependents-entry {
+    margin-top: 14px;
+    color: var(--ink-ghost);
+    font-size: 12px;
+}
+
+.dependents-entry .dl {
+    margin-left: 6px;
+}
+
 .dep-group {
     margin-bottom: 18px;
 }

@@ -772,6 +772,12 @@
         setText('pkg-copyright', pkg.copyright || '—');
         setText('pkg-require-license', String(pkg.requireLicenseAcceptance || 'false'));
 
+        var dependentsLink = $('dependents-link');
+        if (dependentsLink) {
+            dependentsLink.href = 'dependents.html?id=' + encodeURIComponent(pkg.id);
+        }
+        setText('dependents-link-name', pkg.id || 'this package');
+
         renderTags($('pkg-tags'), pkg.tags);
         renderDependencies($('pkg-dependencies'), pkg.dependencies);
 
@@ -1018,6 +1024,191 @@
         }
     }
 
+    /* ----------------------------- user profile page ----------------------------- */
+
+    function flagBadges(flags) {
+        var html = '';
+
+        if (flags && flags.official) {
+            html += ' <span class="chip official-badge" title="this account is marked as an official account by the server administrator">&#9733; official</span>';
+        }
+        if (flags && flags.demo) {
+            html += ' <span class="chip demo-badge" title="this account is marked as a demo account by the server administrator">demo</span>';
+        }
+        if (flags && flags.banned) {
+            html += ' <span class="chip banned-badge" title="this account is banned: its upload requests are rejected by the server">&#9940; banned</span>';
+        }
+
+        return html;
+    }
+
+    function isoDay(value) {
+        if (!value) {
+            return '—';
+        }
+        return String(value).slice(0, 10);
+    }
+
+    function initUserPage() {
+        var email = new URLSearchParams(window.location.search).get('email') || '';
+        var host = $('user-detail');
+
+        if (!email || !host) {
+            if (host) {
+                host.innerHTML = '<div class="empty">missing email in the url query string</div>';
+            }
+            return;
+        }
+
+        document.title = email + ' · nuget';
+        host.innerHTML = '<div class="loading"><span class="spinner"></span>loading account…</div>';
+
+        fetchJSON('/api/user/' + encodeURIComponent(email)).then(function (profile) {
+            document.title = (profile.email || email) + ' · nuget';
+            setText('user-crumb', profile.email || email);
+            host.innerHTML = '';
+
+            /* ---- account headline ---- */
+            var headline = document.createElement('section');
+            headline.className = 'fade-in';
+            headline.innerHTML =
+                '<h2 class="user-email mono"><span class="u">' + esc(profile.email) + '</span>' + flagBadges(profile.flags) + '</h2>' +
+                '<p class="user-meta">' + esc(String(profile.packageCount || 0)) + ' package(s) · ' +
+                esc(formatNumber(profile.totalDownloads || 0)) + ' total downloads</p>';
+            host.appendChild(headline);
+
+            /* ---- projects ---- */
+            var projects = profile.projects || [];
+            var projectSection = document.createElement('section');
+            projectSection.className = 'fade-in';
+
+            if (projects.length) {
+                var chips = projects.map(function (p) {
+                    var label = p.host || p.url;
+                    return '<a class="chip" href="' + esc(p.url) + '" target="_blank" rel="noopener" title="' + esc(p.url) + '">' +
+                        esc(label) + ' · ' + p.packageCount + '</a>';
+                }).join('');
+                projectSection.innerHTML = '<p class="sec-label"><b>01</b> <span>Projects</span></p>' +
+                    '<div class="chip-list">' + chips + '</div>';
+            } else {
+                projectSection.innerHTML = '<p class="sec-label"><b>01</b> <span>Projects</span></p>' +
+                    '<div class="empty">this account declares no project url</div>';
+            }
+            host.appendChild(projectSection);
+
+            /* ---- packages ---- */
+            var packages = profile.packages || [];
+            var packageSection = document.createElement('section');
+            packageSection.className = 'fade-in';
+
+            if (packages.length) {
+                var rows = packages.map(function (p) {
+                    return '<tr>' +
+                        '<td><a href="package.html?id=' + encodeURIComponent(p.package_id) + '"><span class="u">' + esc(p.package_id) + '</span></a></td>' +
+                        '<td class="mono">' + esc(p.latest_version || '') + '</td>' +
+                        '<td class="mono">' + esc(formatNumber(p.total_downloads || 0)) + '</td>' +
+                        '<td class="mono">' + esc(String(p.versions || 0)) + '</td>' +
+                        '<td class="mono">' + esc(isoDay(p.published)) + '</td>' +
+                        '</tr>';
+                }).join('');
+
+                packageSection.innerHTML = '<p class="sec-label"><b>02</b> <span>Packages</span></p>' +
+                    '<div class="tablewrap fade-in"><table>' +
+                    '<thead><tr><th>Package</th><th>Latest</th><th class="num">Downloads</th><th class="num">Versions</th><th>Published</th></tr></thead>' +
+                    '<tbody>' + rows + '</tbody></table></div>';
+            } else {
+                packageSection.innerHTML = '<p class="sec-label"><b>02</b> <span>Packages</span></p>' +
+                    '<div class="empty">this account has not uploaded any package yet</div>';
+            }
+            host.appendChild(packageSection);
+
+            /* ---- activity chart ---- */
+            var trendSection = document.createElement('section');
+            trendSection.className = 'fade-in';
+            trendSection.innerHTML = '<p class="sec-label"><b>03</b> <span>Activity</span></p>' +
+                '<div class="chart">' +
+                '<div class="chart-head"><span>Downloads, page views &amp; doc views of this account</span>' +
+                '<div class="chart-tools" id="user-trend-tools">' +
+                '<button type="button" class="btn tiny" data-days="7">7d</button>' +
+                '<button type="button" class="btn tiny on" data-days="30">30d</button>' +
+                '<button type="button" class="btn tiny" data-days="90">90d</button>' +
+                '</div></div>' +
+                '<div id="user-activity-totals" class="stats" hidden>' +
+                '<div class="stat"><div class="no">a</div><div class="value" id="user-activity-downloads">0</div><div class="label">Downloads</div></div>' +
+                '<div class="stat"><div class="no">b</div><div class="value" id="user-activity-views">0</div><div class="label">Page Views</div></div>' +
+                '<div class="stat"><div class="no">c</div><div class="value" id="user-activity-doc-views">0</div><div class="label">Doc Views</div></div>' +
+                '</div>' +
+                '<div class="chart-canvas" id="user-trend">' +
+                '<div class="loading"><span class="spinner"></span>loading activity…</div>' +
+                '</div></div>' +
+                '<div class="note">the doc views series is plotted on a log10 scale so that it ' +
+                'does not flatten the other two curves; the tooltip shows the raw counts.</div>';
+            host.appendChild(trendSection);
+
+            bindTrendTools('user-trend-tools', function (days) {
+                loadUserActivity(profile.email, days);
+            });
+            loadUserActivity(profile.email, 30);
+        }).catch(function (error) {
+            host.innerHTML = '<div class="empty">failed to load the account "' + esc(email) + '": ' + esc(error.message) + '</div>';
+        });
+    }
+
+    function loadUserActivity(email, days) {
+        loadActivity('user-trend', 'user',
+            '/api/activity/user/' + encodeURIComponent(email) + '?days=' + (days || 30));
+    }
+
+    /* ----------------------------- dependents page ----------------------------- */
+
+    function initDependentsPage() {
+        var id = new URLSearchParams(window.location.search).get('id') || '';
+        var host = $('dependents-detail');
+
+        if (!id || !host) {
+            if (host) {
+                host.innerHTML = '<div class="empty">missing package id in the url query string</div>';
+            }
+            return;
+        }
+
+        document.title = 'dependents of ' + id + ' · nuget';
+        host.innerHTML = '<div class="loading"><span class="spinner"></span>loading dependents…</div>';
+
+        fetchJSON('/api/dependents/' + encodeURIComponent(id)).then(function (result) {
+            var target = result.id || id;
+            var items = result.dependents || [];
+
+            setText('dependents-title', target);
+            setText('dependents-headline', target);
+            setText('dependents-count', String(items.length));
+
+            if (!items.length) {
+                host.innerHTML = '<div class="empty">no package of this feed depends on "' + esc(target) + '"</div>';
+                return;
+            }
+
+            var rows = items.map(function (item) {
+                return '<tr>' +
+                    '<td><a href="' + esc(item.url || ('package.html?id=' + encodeURIComponent(item.id))) + '"><span class="u">' + esc(item.id) + '</span></a></td>' +
+                    '<td class="mono">' + esc(item.latestVersion || '') + '</td>' +
+                    '<td class="mono">' + esc(item.versionRange || '—') + '</td>' +
+                    '<td class="mono">' + esc(formatNumber(item.downloads || 0)) + '</td>' +
+                    '</tr>';
+            }).join('');
+
+            host.innerHTML =
+                '<p class="lede">The packages below depend on <b>' + esc(target) + '</b> and are ' +
+                'hosted in this feed. In the dependency network an arrow points from each of them ' +
+                'to the package it depends on.</p>' +
+                '<div class="tablewrap fade-in"><table>' +
+                '<thead><tr><th>Package</th><th>Latest</th><th>Version Range</th><th class="num">Downloads</th></tr></thead>' +
+                '<tbody>' + rows + '</tbody></table></div>';
+        }).catch(function (error) {
+            host.innerHTML = '<div class="empty">failed to load the dependents: ' + esc(error.message) + '</div>';
+        });
+    }
+
     document.addEventListener('DOMContentLoaded', function () {
         var page = document.body.getAttribute('data-page');
 
@@ -1029,6 +1220,10 @@
             loadAbout();
         } else if (page === 'tags') {
             initTags();
+        } else if (page === 'user') {
+            initUserPage();
+        } else if (page === 'dependents') {
+            initDependentsPage();
         }
     });
 })();

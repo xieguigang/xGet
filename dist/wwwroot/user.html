@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>User · nuget</title>
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <link rel="stylesheet" href="assets/css/scibasic.css" />
+    <link rel="sitemap" type="application/xml" title="Sitemap" href="sitemap.xml" />
+</head>
+
+<body data-page="user">
+
+    <header class="topbar">
+        <a class="brand" href="index.html">
+            <img src="favicon.png" alt="nuget server logo" onerror="this.style.display='none'" />
+            <strong>nuget</strong>
+            <span class="sub">package server</span>
+        </a>
+        <nav class="topnav">
+            <a href="index.html">Packages</a>
+            <a href="about.html">Statistics</a>
+            <a href="graph.html">Graphs</a>
+            <a href="docs/index.html">API Docs</a>
+            <a href="v3/index.json">Service Index</a>
+        </nav>
+        <a class="home-btn" href="index.html" title="Back to packages" aria-label="Back">↖</a>
+    </header>
+
+    <main class="wrap">
+        <p class="eyebrow"><b>01</b> <span>Account — <span id="user-crumb">…</span></span></p>
+
+        <article class="pkg-article">
+            <div id="user-detail">
+                <div class="loading"><span class="spinner"></span>loading account…</div>
+            </div>
+        </article>
+    </main>
+
+    <footer class="site">
+        <div class="pn">
+            <a href="index.html"><span>Previous</span>Packages</a>
+            <a href="about.html"><span>Next</span>Statistics</a>
+        </div>
+        <div class="legal"><a href="https://github.com/xieguigang/xGet">nuget · experimental feed</a> · powered by <a
+                href="https://github.com/xieguigang/flute">Fluteway</a> + <a
+                href="https://github.com/xieguigang/JSql">JSql</a> · <a href="sitemap.xml">Sitemap</a></div>
+    </footer>
+
+    <script src="assets/vendor/echarts.min.js"></script>
+    <script src="assets/js/app.js"></script>
+</body>
+
+</html>

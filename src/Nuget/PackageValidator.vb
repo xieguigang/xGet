@@ -73,11 +73,17 @@ Public Module PackageValidator
     End Function
 
     ''' <summary>
-    ''' structural test whether the given pe image is a managed assembly: the
-    ''' clr runtime header entry (data directory index 14) of the optional
-    ''' header must be non zero.
+    ''' structural test whether the given pe image is a managed assembly.
     ''' 
-    ''' the check reads at most one 4 KB buffer from the stream and never uses
+    ''' primary test: the clr runtime header entry (data directory index 14) of
+    ''' the optional header must be non zero. fallback test: the presence of the
+    ''' ``BSJB`` clr metadata root signature inside the image, which every
+    ''' managed assembly carries (and which a plain native dll does not). the
+    ''' fallback keeps the check working when the pe offsets of a hostile or
+    ''' unusual image can not be followed; the check is purely structural, no
+    ''' assembly is loaded and no code is executed.
+    ''' 
+    ''' the check reads at most one 16 KB buffer from the stream and never uses
     ''' ``Stream.Length``/``Stream.Seek``: the deflate stream of a zip entry
     ''' does not support them.
     ''' </summary>
@@ -88,7 +94,7 @@ Public Module PackageValidator
         End If
 
         Try
-            Dim buffer(4095) As Byte
+            Dim buffer(16383) As Byte
             Dim total As Integer = 0
             Dim read As Integer
 
@@ -112,46 +118,80 @@ Public Module PackageValidator
                 Return False
             End If
 
-            ' the pe header offset from the dos stub
-            Dim peOffset As Integer = readI32(buffer, &H3C)
-
-            If peOffset <= 0 OrElse peOffset + 264 > total Then
-                Return False
+            If hasClrDataDirectory(buffer, total) Then
+                Return True
             End If
 
-            ' the "PE\0\0" signature
-            If readI32(buffer, peOffset) <> &H4550 Then
-                Return False
-            End If
-
-            ' the optional header follows the 20 bytes coff header
-            Dim optionalHeader As Integer = peOffset + 24
-            Dim magic As Integer = readU16(buffer, optionalHeader)
-            Dim dataDirectories As Integer
-
-            Select Case magic
-                Case &H10BI  ' pe32
-                    dataDirectories = optionalHeader + 96
-                Case &H20BI  ' pe32+
-                    dataDirectories = optionalHeader + 112
-                Case Else
-                    Return False
-            End Select
-
-            ' data directory index 14: the clr runtime header
-            Dim clrRva As Integer = readI32(buffer, dataDirectories + 14 * 8)
-
-            Return clrRva <> 0
+            ' fallback: the "BSJB" metadata root signature of a managed assembly
+            Return hasMetadataSignature(buffer, total)
         Catch
             Return False
         End Try
     End Function
 
+    ''' <summary>
+    ''' the primary pe walk: dos e_lfanew -> "PE\0\0" -> optional header magic
+    ''' -> data directory index 14 (the clr runtime header) must be non zero.
+    ''' </summary>
+    Private Function hasClrDataDirectory(buffer As Byte(), total As Integer) As Boolean
+        Dim peOffset As Integer = readI32(buffer, &H3C)
+
+        If peOffset <= 0 OrElse peOffset + 264 > total Then
+            Return False
+        End If
+
+        ' the "PE\0\0" signature
+        If readI32(buffer, peOffset) <> &H4550 Then
+            Return False
+        End If
+
+        ' the optional header follows the 20 bytes coff header
+        Dim optionalHeader As Integer = peOffset + 24
+        Dim magic As Integer = readU16(buffer, optionalHeader)
+        Dim dataDirectories As Integer
+
+        Select Case magic
+            Case &H10BI  ' pe32
+                dataDirectories = optionalHeader + 96
+            Case &H20BI  ' pe32+
+                dataDirectories = optionalHeader + 112
+            Case Else
+                Return False
+        End Select
+
+        ' data directory index 14: the clr runtime header
+        Dim clrRva As Integer = readI32(buffer, dataDirectories + 14 * 8)
+
+        Return clrRva <> 0
+    End Function
+
+    ''' <summary>
+    ''' search the image window for the "BSJB" signature of the clr metadata
+    ''' root (".net metadata"). every managed assembly carries it, usually near
+    ''' the end of the file.
+    ''' </summary>
+    Private Function hasMetadataSignature(buffer As Byte(), total As Integer) As Boolean
+        For i As Integer = 0 To total - 4
+            If buffer(i) = &H42 AndAlso buffer(i + 1) = &H53 AndAlso
+               buffer(i + 2) = &H4A AndAlso buffer(i + 3) = &H42 Then
+                Return True
+            End If
+        Next
+
+        Return False
+    End Function
+
+    ''' <summary>
+    ''' little endian scalar readers. the byte values must be widened with
+    ''' ``CInt`` before shifting: in VB ``Byte << 8`` yields a Byte again (the
+    ''' shift count is taken modulo 8), which silently drops the high bytes.
+    ''' </summary>
     Private Function readU16(buffer As Byte(), offset As Integer) As Integer
-        Return buffer(offset) Or (buffer(offset + 1) << 8)
+        Return CInt(buffer(offset)) Or (CInt(buffer(offset + 1)) << 8)
     End Function
 
     Private Function readI32(buffer As Byte(), offset As Integer) As Integer
-        Return buffer(offset) Or (buffer(offset + 1) << 8) Or (buffer(offset + 2) << 16) Or (buffer(offset + 3) << 24)
+        Return CInt(buffer(offset)) Or (CInt(buffer(offset + 1)) << 8) Or
+               (CInt(buffer(offset + 2)) << 16) Or (CInt(buffer(offset + 3)) << 24)
     End Function
 End Module
