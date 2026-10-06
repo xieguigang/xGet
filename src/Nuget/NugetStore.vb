@@ -56,6 +56,28 @@ Public Class TableSnapshot
 End Class
 
 ''' <summary>
+''' the three admin flags of one account: the ``official`` badge, the ``demo``
+''' demo badge and the ``banned`` upload ban. the email is always stored in its
+''' lower case form.
+''' </summary>
+Public Class UserFlagRecord
+    Public Property email As String
+    Public Property official As Boolean
+    Public Property demo As Boolean
+    Public Property banned As Boolean
+End Class
+
+''' <summary>
+''' one distinct project url of the packages of one account, with the count of
+''' the packages that point to it.
+''' </summary>
+Public Class ProjectInfo
+    Public Property url As String
+    Public Property host As String
+    Public Property packageCount As Integer
+End Class
+
+''' <summary>
 ''' one published package version record.
 ''' </summary>
 Public Class PackageRecord
@@ -330,8 +352,10 @@ Public Class NugetStore
                 "  id INT NOT NULL PRIMARY KEY," &
                 "  email VARCHAR(320) NOT NULL," &
                 "  official BOOLEAN DEFAULT FALSE," &
+                "  demo BOOLEAN DEFAULT FALSE," &
+                "  banned BOOLEAN DEFAULT FALSE," &
                 "  updated DATETIME" &
-                ") COMMENT='per user admin flags (official badge)'")
+                ") COMMENT='per user admin flags (official/demo/banned)'")
             Call engine.Execute(
                 "CREATE TABLE IF NOT EXISTS package_uploaders (" &
                 "  id INT NOT NULL PRIMARY KEY," &
@@ -362,7 +386,68 @@ Public Class NugetStore
                 "  value LONGTEXT," &
                 "  updated DATETIME" &
                 ") COMMENT='server side settings (encrypted mail config etc.)'")
+
+            ' a database that was created by an earlier build of this version may
+            ' carry a user_flags table without the demo/banned columns: JSql has
+            ' no ALTER TABLE, so the table is rebuilt in place when needed.
+            Call migrateUserFlagColumns()
         End SyncLock
+    End Sub
+
+    ''' <summary>
+    ''' defensive in place migration of the ``user_flags`` table: when the
+    ''' ``demo`` or ``banned`` column is missing (a database that was created
+    ''' before the flags were introduced) the existing rows are read, the table
+    ''' is dropped and recreated with the full column set and the rows are
+    ''' written back. the migration is a no-op when the columns already exist.
+    ''' </summary>
+    Private Sub migrateUserFlagColumns()
+        Try
+            query("SELECT official, demo, banned FROM user_flags")
+            Return
+        Catch
+            ' the columns are missing: fall through to the rebuild
+        End Try
+
+        Dim rows As New List(Of UserFlagRecord)
+
+        Try
+            Dim rs As ResultSet = query("SELECT id, email, official, updated FROM user_flags")
+
+            If rs IsNot Nothing AndAlso rs.IsQuery Then
+                For Each row As Object() In rs.Rows
+                    rows.Add(New UserFlagRecord With {
+                        .email = toStr(row(1)).Trim().ToLowerInvariant(),
+                        .official = toBool(row(2))
+                    })
+                Next
+            End If
+        Catch
+            ' no readable rows: the rebuild simply starts empty
+        End Try
+
+        Try
+            exec("DROP TABLE user_flags")
+        Catch
+        End Try
+
+        Call engine.Execute(
+            "CREATE TABLE IF NOT EXISTS user_flags (" &
+            "  id INT NOT NULL PRIMARY KEY," &
+            "  email VARCHAR(320) NOT NULL," &
+            "  official BOOLEAN DEFAULT FALSE," &
+            "  demo BOOLEAN DEFAULT FALSE," &
+            "  banned BOOLEAN DEFAULT FALSE," &
+            "  updated DATETIME" &
+            ") COMMENT='per user admin flags (official/demo/banned)'")
+
+        For Each item As UserFlagRecord In rows
+            Dim id As Long = nextId("user_flags")
+            Call exec($"INSERT INTO user_flags (id, email, official, demo, banned, updated) VALUES (" &
+                      $"{id}, '{esc(item.email)}', {If(item.official, "TRUE", "FALSE")}, FALSE, FALSE, {dateLiteral(Date.UtcNow)})")
+        Next
+
+        Call $"user_flags table was rebuilt with the demo/banned columns ({rows.Count} row(s) kept).".info()
     End Sub
 
 #Region "sql helpers"
@@ -469,12 +554,14 @@ Public Class NugetStore
         If String.IsNullOrEmpty(email) Then Return Nothing
 
         SyncLock sync
-            Dim official As HashSet(Of String) = officialEmailsNoLock()
+            Dim official As Dictionary(Of String, UserFlagRecord) = flagsNoLock()
             Dim rs As ResultSet = query($"SELECT id, email, salt, secret, created FROM users")
             For Each row As Object() In rs.Rows
                 Dim record = readUser(rs.Columns, row)
                 If record.email IsNot Nothing AndAlso record.email.Equals(email.Trim(), StringComparison.OrdinalIgnoreCase) Then
-                    record.official = official.Contains(record.email)
+                    If official.ContainsKey(record.email.ToLowerInvariant()) Then
+                        record.official = official(record.email.ToLowerInvariant()).official
+                    End If
                     Return record
                 End If
             Next
@@ -507,13 +594,15 @@ Public Class NugetStore
 
     Public Function ReadAllUsers() As List(Of UserRecord)
         SyncLock sync
-            Dim official As HashSet(Of String) = officialEmailsNoLock()
+            Dim official As Dictionary(Of String, UserFlagRecord) = flagsNoLock()
             Dim rs As ResultSet = query("SELECT id, email, salt, secret, created FROM users")
             Dim list As New List(Of UserRecord)
 
             For Each row As Object() In rs.Rows
                 Dim record = readUser(rs.Columns, row)
-                record.official = official.Contains(record.email)
+                If record.email IsNot Nothing AndAlso official.ContainsKey(record.email.ToLowerInvariant()) Then
+                    record.official = official(record.email.ToLowerInvariant()).official
+                End If
                 list.Add(record)
             Next
 
@@ -566,48 +655,97 @@ Public Class NugetStore
     End Function
 
     ''' <summary>
-    ''' test whether the given account carries the ``official`` badge.
+    ''' read the three admin flags of the given account. a missing flag row is
+    ''' reported as an all-false record, so the caller never has to test for
+    ''' Nothing.
     ''' </summary>
-    Public Function IsUserOfficial(email As String) As Boolean
-        If String.IsNullOrEmpty(email) Then
-            Return False
+    Public Function GetUserFlags(email As String) As UserFlagRecord
+        Dim result As New UserFlagRecord With {
+            .email = If(email, "").Trim().ToLowerInvariant()
+        }
+
+        If String.IsNullOrEmpty(result.email) Then
+            Return result
         End If
 
         SyncLock sync
-            Return officialEmailsNoLock().Contains(email.Trim())
+            Dim flags As Dictionary(Of String, UserFlagRecord) = flagsNoLock()
+
+            If flags.ContainsKey(result.email) Then
+                Return flags(result.email)
+            End If
+
+            Return result
         End SyncLock
     End Function
+
+    ''' <summary>
+    ''' test whether the given account carries the ``official`` badge.
+    ''' </summary>
+    Public Function IsUserOfficial(email As String) As Boolean
+        Return GetUserFlags(email).official
+    End Function
+
+    ''' <summary>
+    ''' test whether the given account carries the ``demo`` badge.
+    ''' </summary>
+    Public Function IsUserDemo(email As String) As Boolean
+        Return GetUserFlags(email).demo
+    End Function
+
+    ''' <summary>
+    ''' test whether the given account is in the ``banned`` state (its upload
+    ''' requests are rejected).
+    ''' </summary>
+    Public Function IsUserBanned(email As String) As Boolean
+        Return GetUserFlags(email).banned
+    End Function
+
+    ''' <summary>
+    ''' set (or clear) one of the three admin flags (``official``, ``demo`` or
+    ''' ``banned``) of the given account.
+    ''' </summary>
+    Public Sub SetUserFlag(email As String, flagName As String, flag As Boolean)
+        If String.IsNullOrEmpty(email) Then
+            Return
+        End If
+
+        Dim column As String = If(flagName, "").Trim().ToLowerInvariant()
+
+        If column <> "official" AndAlso column <> "demo" AndAlso column <> "banned" Then
+            Throw New ArgumentException($"unknown user flag: '{flagName}'")
+        End If
+
+        email = email.Trim().ToLowerInvariant()
+
+        SyncLock sync
+            Dim flags As Dictionary(Of String, UserFlagRecord) = flagsNoLock()
+            Dim now As Date = Date.UtcNow
+            Dim foundId As Long = -1
+            Dim current As New UserFlagRecord With {.email = email}
+
+            If flags.ContainsKey(email) Then
+                current = flags(email)
+                foundId = flagIdNoLock(email)
+            End If
+
+            If foundId >= 0 Then
+                Call exec($"UPDATE user_flags SET {column} = {If(flag, "TRUE", "FALSE")}, updated = {dateLiteral(now)} WHERE id = {foundId}")
+            ElseIf flag Then
+                Dim id As Long = nextId("user_flags")
+                Call exec(
+                    $"INSERT INTO user_flags (id, email, official, demo, banned, updated) VALUES (" &
+                    $"{id}, '{esc(email)}', {If(column = "official", "TRUE", "FALSE")}, " &
+                    $"{If(column = "demo", "TRUE", "FALSE")}, {If(column = "banned", "TRUE", "FALSE")}, {dateLiteral(now)})")
+            End If
+        End SyncLock
+    End Sub
 
     ''' <summary>
     ''' set (or clear) the ``official`` badge of the given account.
     ''' </summary>
     Public Sub SetUserOfficial(email As String, flag As Boolean)
-        If String.IsNullOrEmpty(email) Then
-            Return
-        End If
-
-        email = email.Trim()
-
-        SyncLock sync
-            Dim rs As ResultSet = query($"SELECT id, email FROM user_flags WHERE official = TRUE")
-            Dim foundId As Long = -1
-
-            If rs IsNot Nothing AndAlso rs.IsQuery Then
-                For Each row As Object() In rs.Rows
-                    If String.Equals(toStr(row(1)), email, StringComparison.OrdinalIgnoreCase) Then
-                        foundId = toLong(row(0))
-                        Exit For
-                    End If
-                Next
-            End If
-
-            If foundId >= 0 Then
-                Call exec($"UPDATE user_flags SET official = {If(flag, "TRUE", "FALSE")}, updated = {dateLiteral(Date.UtcNow)} WHERE id = {foundId}")
-            ElseIf flag Then
-                Dim id As Long = nextId("user_flags")
-                Call exec($"INSERT INTO user_flags (id, email, official, updated) VALUES ({id}, '{esc(email.ToLowerInvariant())}', TRUE, {dateLiteral(Date.UtcNow)})")
-            End If
-        End SyncLock
+        Call SetUserFlag(email, "official", flag)
     End Sub
 
     ''' <summary>
@@ -615,21 +753,58 @@ Public Class NugetStore
     ''' </summary>
     Public Function GetOfficialEmails() As HashSet(Of String)
         SyncLock sync
-            Return officialEmailsNoLock()
+            Dim set_ As New HashSet(Of String)(StringComparer.OrdinalIgnoreCase)
+
+            For Each item As UserFlagRecord In flagsNoLock().Values
+                If item.official Then
+                    Call set_.Add(item.email)
+                End If
+            Next
+
+            Return set_
         End SyncLock
     End Function
 
-    Private Function officialEmailsNoLock() As HashSet(Of String)
-        Dim set_ As New HashSet(Of String)(StringComparer.OrdinalIgnoreCase)
-        Dim rs As ResultSet = query("SELECT email FROM user_flags WHERE official = TRUE")
+    ''' <summary>
+    ''' read every flag row of the ``user_flags`` table, keyed by the lower case
+    ''' email.
+    ''' </summary>
+    Private Function flagsNoLock() As Dictionary(Of String, UserFlagRecord)
+        Dim flags As New Dictionary(Of String, UserFlagRecord)(StringComparer.OrdinalIgnoreCase)
+        Dim rs As ResultSet = query("SELECT email, official, demo, banned FROM user_flags")
 
         If rs IsNot Nothing AndAlso rs.IsQuery Then
             For Each row As Object() In rs.Rows
-                Call set_.Add(toStr(row(0)))
+                Dim item As New UserFlagRecord With {
+                    .email = toStr(row(0)).Trim().ToLowerInvariant(),
+                    .official = toBool(row(1)),
+                    .demo = toBool(row(2)),
+                    .banned = toBool(row(3))
+                }
+
+                flags(item.email) = item
             Next
         End If
 
-        Return set_
+        Return flags
+    End Function
+
+    ''' <summary>
+    ''' the primary key of the flag row of the given email, or -1 when the
+    ''' account has no flag row yet.
+    ''' </summary>
+    Private Function flagIdNoLock(email As String) As Long
+        Dim rs As ResultSet = query("SELECT id, email FROM user_flags")
+
+        If rs IsNot Nothing AndAlso rs.IsQuery Then
+            For Each row As Object() In rs.Rows
+                If String.Equals(toStr(row(1)), email, StringComparison.OrdinalIgnoreCase) Then
+                    Return toLong(row(0))
+                End If
+            Next
+        End If
+
+        Return -1
     End Function
 
     Private Shared Function readUser(columns As List(Of String), row As Object()) As UserRecord
@@ -1380,6 +1555,240 @@ Public Class NugetStore
 
         total = all.Count
         Return all.Skip(skip).Take(take).ToList()
+    End Function
+
+    ''' <summary>
+    ''' read the package summaries of every package that the given account has
+    ''' uploaded, ordered by the total download count.
+    ''' </summary>
+    Public Function GetUserPackages(email As String) As List(Of PackageSummary)
+        Dim ids As New HashSet(Of String)(StringComparer.OrdinalIgnoreCase)
+
+        If String.IsNullOrEmpty(email) Then
+            Return New List(Of PackageSummary)
+        End If
+
+        SyncLock sync
+            Dim rs As ResultSet = query($"SELECT package_id FROM package_uploaders WHERE email = '{esc(email.Trim().ToLowerInvariant())}'")
+
+            If rs IsNot Nothing AndAlso rs.IsQuery Then
+                For Each row As Object() In rs.Rows
+                    Call ids.Add(toStr(row(0)))
+                Next
+            End If
+        End SyncLock
+
+        Return ListPackages("") _
+            .Where(Function(p) ids.Contains(p.package_id)) _
+            .OrderByDescending(Function(p) p.total_downloads) _
+            .ToList()
+    End Function
+
+    ''' <summary>
+    ''' read the distinct project urls of every package that the given account
+    ''' has uploaded, together with the package count of each project.
+    ''' </summary>
+    Public Function GetUserProjects(email As String) As List(Of ProjectInfo)
+        Dim projects As New Dictionary(Of String, ProjectInfo)(StringComparer.OrdinalIgnoreCase)
+
+        For Each pkg As PackageSummary In GetUserPackages(email)
+            Dim url As String = If(pkg.project_url, "").Trim()
+
+            If String.IsNullOrEmpty(url) Then
+                Continue For
+            End If
+
+            Dim key As String = url.ToLowerInvariant()
+
+            If Not projects.ContainsKey(key) Then
+                projects(key) = New ProjectInfo With {
+                    .url = url,
+                    .host = ProjectHost(url),
+                    .packageCount = 0
+                }
+            End If
+
+            projects(key).packageCount += 1
+        Next
+
+        Return projects.Values _
+            .OrderByDescending(Function(p) p.packageCount) _
+            .ThenBy(Function(p) p.url, StringComparer.OrdinalIgnoreCase) _
+            .ToList()
+    End Function
+
+    ''' <summary>
+    ''' the daily download / page view / doc view activity aggregated over every
+    ''' package that the given account has uploaded.
+    ''' </summary>
+    Public Function GetUserActivityAggregate(email As String, days As Integer) As List(Of DailyActivity)
+        Dim ids As New HashSet(Of String)(StringComparer.OrdinalIgnoreCase)
+
+        If String.IsNullOrEmpty(email) Then
+            Return New List(Of DailyActivity)
+        End If
+
+        Dim from As String = DayKey(Date.UtcNow.AddDays(-(Math.Max(1, days) - 1)))
+        Dim aggregated As New Dictionary(Of String, DailyActivity)(StringComparer.Ordinal)
+
+        SyncLock sync
+            Dim rs As ResultSet = query($"SELECT package_id FROM package_uploaders WHERE email = '{esc(email.Trim().ToLowerInvariant())}'")
+
+            If rs IsNot Nothing AndAlso rs.IsQuery Then
+                For Each row As Object() In rs.Rows
+                    Call ids.Add(toStr(row(0)))
+                Next
+            End If
+
+            If ids.Count = 0 Then
+                Return New List(Of DailyActivity)
+            End If
+
+            For Each row As DailyActivity In ReadActivityRows()
+                If row.day < from OrElse Not ids.Contains(row.package_id) Then
+                    Continue For
+                End If
+
+                Dim item As DailyActivity = Nothing
+                If Not aggregated.TryGetValue(row.day, item) Then
+                    item = New DailyActivity With {.day = row.day}
+                    aggregated(row.day) = item
+                End If
+
+                item.downloads += row.downloads
+                item.views += row.views
+            Next
+
+            For Each row As DailyActivity In ReadDocActivityRows()
+                If row.day < from OrElse Not ids.Contains(row.package_id) Then
+                    Continue For
+                End If
+
+                Dim item As DailyActivity = Nothing
+                If Not aggregated.TryGetValue(row.day, item) Then
+                    item = New DailyActivity With {.day = row.day}
+                    aggregated(row.day) = item
+                End If
+
+                item.docViews += row.docViews
+            Next
+        End SyncLock
+
+        Return aggregated.Values.OrderBy(Function(a) a.day, StringComparer.Ordinal).ToList()
+    End Function
+
+    ''' <summary>
+    ''' read every package that depends on the given package (the reverse
+    ''' dependency view). one entry per dependent package, taken from its latest
+    ''' published version.
+    ''' </summary>
+    Public Function GetPackageDependents(packageId As String) As List(Of NuspecDependency)
+        Dim list As New List(Of NuspecDependency)
+        Dim key As String = If(packageId, "").Trim().ToLowerInvariant()
+
+        If String.IsNullOrEmpty(key) Then
+            Return list
+        End If
+
+        SyncLock sync
+            Dim rs As ResultSet = query("SELECT package_id, version, dependency_id, version_range FROM package_dependencies")
+
+            If rs Is Nothing OrElse Not rs.IsQuery Then
+                Return list
+            End If
+
+            ' the dependent package -> its rows that depend on the key
+            Dim candidates As New Dictionary(Of String, List(Of String))(StringComparer.OrdinalIgnoreCase)
+
+            For Each row As Object() In rs.Rows
+                If Not String.Equals(toStr(row(2)).Trim(), key, StringComparison.OrdinalIgnoreCase) Then
+                    Continue For
+                End If
+
+                Dim dependent As String = toStr(row(0))
+
+                If Not candidates.ContainsKey(dependent) Then
+                    candidates(dependent) = New List(Of String)
+                End If
+
+                Call candidates(dependent).Add(toStr(row(1)) & vbTab & toStr(row(3)))
+            Next
+
+            For Each item As KeyValuePair(Of String, List(Of String)) In candidates
+                Dim version As String = latestVersionOf(item.Key)
+
+                If String.IsNullOrEmpty(version) Then
+                    Continue For
+                End If
+
+                ' take the dependency range of the latest version only
+                Dim range As String = ""
+                Dim found As Boolean = False
+
+                For Each pair As String In item.Value
+                    Dim parts = pair.Split(vbTab(0))
+                    If String.Equals(parts(0), version, StringComparison.OrdinalIgnoreCase) Then
+                        range = parts(1)
+                        found = True
+                        Exit For
+                    End If
+                Next
+
+                If found OrElse item.Value.Count = 1 Then
+                    Call list.Add(New NuspecDependency With {
+                        .id = item.Key,
+                        .range = range
+                    })
+                Else
+                    ' the latest version has no dependency row: keep any recorded range
+                    Dim parts = item.Value(0).Split(vbTab(0))
+                    Call list.Add(New NuspecDependency With {
+                        .id = item.Key,
+                        .range = parts(1)
+                    })
+                End If
+            Next
+        End SyncLock
+
+        Return list.OrderBy(Function(d) d.id, StringComparer.OrdinalIgnoreCase).ToList()
+    End Function
+
+    ''' <summary>
+    ''' the host part of a project url (for example ``github.com``), or an empty
+    ''' string when the url can not be parsed.
+    ''' </summary>
+    Public Shared Function ProjectHost(url As String) As String
+        Dim value As String = If(url, "").Trim()
+
+        If String.IsNullOrEmpty(value) Then
+            Return ""
+        End If
+
+        Dim uri As Uri = Nothing
+
+        If Uri.TryCreate(value, UriKind.Absolute, uri) AndAlso
+           (uri.Scheme = "http" OrElse uri.Scheme = "https") Then
+            Return uri.Host.ToLowerInvariant()
+        End If
+
+        ' tolerate a scheme less value like ``github.com/xieguigang/xDoc``
+        Dim text As String = value.ToLowerInvariant()
+
+        If text.Contains("://") Then
+            text = text.Substring(text.IndexOf("://") + 3)
+        End If
+
+        Dim slash As Integer = text.IndexOf("/"c)
+
+        If slash > 0 Then
+            text = text.Substring(0, slash)
+        End If
+
+        If text.Contains(".") OrElse text.Contains(":") Then
+            Return text
+        End If
+
+        Return ""
     End Function
 
     Private Function latestVersionOf(packageId As String) As String
