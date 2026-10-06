@@ -65,6 +65,9 @@
       <Platform Solution="Release|x64" Project="x64" />
     </Project>
   </Folder>
+  <Project Path="src/xConsole/xConsole.vbproj" Id="1973b731-e6fe-4d9f-b2d0-5ed11678ce16">
+    <Platform Solution="Release|x64" Project="x64" />
+  </Project>
   <Project Path="src/xGet/xGet.vbproj" Id="b217e061-6101-4314-850b-29c931e01485">
     <Platform Solution="*|x64" Project="x64" />
   </Project>
