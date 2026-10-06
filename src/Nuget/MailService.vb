@@ -206,6 +206,24 @@ Public Module MailService
     End Function
 
     ''' <summary>
+    ''' render the self service totp secret reset mail html body from the
+    ''' replaceable template file (``template/reset-email.html``) with the
+    ''' built-in fallback.
+    ''' </summary>
+    Public Function RenderResetEmail(templateDirectory As String, email As String,
+                                     resetUrl As String, serverUrl As String, ttlMinutes As Integer) As String
+        Dim values As New Dictionary(Of String, String) From {
+            {"email", DocHtml.Escape(email)},
+            {"reset_url", DocHtml.Attr(resetUrl)},
+            {"reset_url_text", DocHtml.Escape(resetUrl)},
+            {"server", DocHtml.Escape(serverUrl)},
+            {"ttl", ttlMinutes.ToString}
+        }
+
+        Return renderTemplate(templateDirectory, "reset-email.html", values, fallbackResetEmail)
+    End Function
+
+    ''' <summary>
     ''' render the verification success page from the replaceable template file
     ''' (``template/verify-success.html``) with the built-in fallback.
     ''' </summary>
@@ -359,6 +377,28 @@ Public Module MailService
         "<h1 style=""margin:18px 0 8px;color:#1F2937;font-size:24px;"">Verification failed</h1>" &
         "<p style=""margin:0 0 12px;color:#6B7280;font-size:14px;"">{{reason}}</p>" &
         "<p style=""margin:0;color:#6B7280;font-size:14px;"">" &
-        "please run <code style=""font-family:Consolas,monospace;"">xGet register</code> again to receive a new verification link.</p>" &
+        "please open the link from your mailbox again while it is still valid, or run " &
+        "<code style=""font-family:Consolas,monospace;"">xGet reset</code> to receive a fresh link.</p>" &
+        "</div></body></html>"
+
+    ''' <summary>
+    ''' the built-in totp secret reset mail template.
+    ''' </summary>
+    Private Const fallbackResetEmail As String =
+        "<!DOCTYPE html><html lang=""en""><head><meta charset=""UTF-8"" />" &
+        "<meta name=""viewport"" content=""width=device-width, initial-scale=1.0"" />" &
+        "<title>TOTP secret reset</title></head>" &
+        "<body style=""margin:0;padding:40px 16px;background:#F5F7FB;font-family:'Segoe UI',Helvetica,Arial,sans-serif;"">" &
+        "<div style=""max-width:640px;margin:0 auto;background:#FFFFFF;border-radius:12px;padding:36px;"">" &
+        "<h1 style=""margin:0 0 16px;color:#1F2937;font-size:24px;"">Reset your nuget authorization</h1>" &
+        "<p style=""margin:0 0 20px;color:#6B7280;font-size:14px;"">" &
+        "a secret reset was requested for the account <b>{{email}}</b> on {{server}}. " &
+        "open the link below to receive a new base64 authorization code: the old totp " &
+        "secret stops working as soon as the reset page is opened.</p>" &
+        "<p style=""margin:0 0 20px;color:#6B7280;font-size:14px;""><a href=""{{reset_url}}"">open the reset page</a> " &
+        "(valid for {{ttl}} minutes)</p>" &
+        "<p style=""margin:0;color:#6B7280;font-size:14px;"">" &
+        "then save the new code locally with <code style=""font-family:Consolas,monospace;"">xGet activate</code>. " &
+        "if you did not request this reset, simply ignore this mail.</p>" &
         "</div></body></html>"
 End Module

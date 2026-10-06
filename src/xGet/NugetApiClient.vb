@@ -81,6 +81,29 @@ Public Class NugetApiClient
     End Function
 
     ''' <summary>
+    ''' request the self service totp secret reset mail for the given email.
+    ''' </summary>
+    Public Function RequestReset(email As String, Optional timeout As TimeSpan? = Nothing) As ApiResult
+        Using content As New FormUrlEncodedContent(New Dictionary(Of String, String) From {
+            {"email", email}
+        })
+            Using cts As CancellationTokenSource = createTimeout(timeout)
+                Try
+                    Using response As HttpResponseMessage = Http _
+                        .PostAsync($"{baseUrl}/api/reset", content, cts.Token) _
+                        .GetAwaiter() _
+                        .GetResult()
+
+                        Return parse(response)
+                    End Using
+                Catch ex As OperationCanceledException
+                    Return timeoutResult(timeout)
+                End Try
+            End Using
+        End Using
+    End Function
+
+    ''' <summary>
     ''' upload a nupkg file with the given email and TOTP code through the
     ''' custom multipart endpoint.
     ''' </summary>

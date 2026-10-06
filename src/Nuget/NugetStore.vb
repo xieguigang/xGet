@@ -248,7 +248,7 @@ Public Class NugetStore
         "users", "packages", "statistics", "package_tags", "package_dependencies",
         "package_metadata", "package_activity", "package_doc_activity",
         "package_clusters", "package_api_docs", "user_flags", "package_uploaders",
-        "pending_registrations", "email_blacklist", "server_settings"
+        "pending_registrations", "pending_resets", "email_blacklist", "server_settings"
     }
 
     Private Sub initialize()
@@ -374,6 +374,16 @@ Public Class NugetStore
                 "  created DATETIME," &
                 "  expires DATETIME" &
                 ") COMMENT='email verification pending registrations'")
+            Call engine.Execute(
+                "CREATE TABLE IF NOT EXISTS pending_resets (" &
+                "  id INT NOT NULL PRIMARY KEY," &
+                "  email VARCHAR(320) NOT NULL," &
+                "  token VARCHAR(160) NOT NULL," &
+                "  salt VARCHAR(256) NOT NULL," &
+                "  secret VARCHAR(128) NOT NULL," &
+                "  created DATETIME," &
+                "  expires DATETIME" &
+                ") COMMENT='self service totp secret reset requests'")
             Call engine.Execute(
                 "CREATE TABLE IF NOT EXISTS email_blacklist (" &
                 "  id INT NOT NULL PRIMARY KEY," &
@@ -649,7 +659,13 @@ Public Class NugetStore
                 Return False
             End If
 
-            Call exec($"UPDATE users SET salt = '{esc(salt)}', secret = '{esc(secret)}' WHERE id = {user.id}")
+            ' the row is rebuilt through delete + insert instead of an in place
+            ' update: the insert path is the one which every other write of the
+            ' store goes through, so it is the most exercised code path.
+            Call exec($"DELETE FROM users WHERE id = {user.id}")
+            Call exec(
+                "INSERT INTO users (id, email, salt, secret, created) VALUES (" &
+                $"{user.id}, '{esc(user.email)}', '{esc(salt)}', '{esc(secret)}', {dateLiteral(If(user.created = Date.MinValue, Date.UtcNow, user.created))})")
             Return True
         End SyncLock
     End Function
@@ -2125,6 +2141,129 @@ Public Class NugetStore
             For Each row As Object() In rs.Rows
                 If toDate(row(1)) < Date.UtcNow Then
                     Call exec($"DELETE FROM pending_registrations WHERE id = {toLong(row(0))}")
+                End If
+            Next
+        End SyncLock
+    End Sub
+
+#Region "pending secret resets (self service)"
+    ''' <summary>
+    ''' is there a pending secret reset request of the given email which has not
+    ''' expired yet? it throttles the reset mails so that one mailbox can not be
+    ''' flooded with reset links.
+    ''' </summary>
+    Public Function HasPendingReset(email As String) As Boolean
+        If String.IsNullOrEmpty(email) Then
+            Return False
+        End If
+
+        Dim target As String = email.Trim().ToLowerInvariant()
+
+        SyncLock sync
+            Dim rs As ResultSet = query("SELECT email, expires FROM pending_resets")
+
+            If rs Is Nothing OrElse Not rs.IsQuery Then
+                Return False
+            End If
+
+            For Each row As Object() In rs.Rows
+                If String.Equals(toStr(row(0)), target, StringComparison.OrdinalIgnoreCase) AndAlso
+                   toDate(row(1)) >= Date.UtcNow Then
+                    Return True
+                End If
+            Next
+        End SyncLock
+
+        Return False
+    End Function
+
+    ''' <summary>
+    ''' create one self service totp secret reset request.
+    ''' </summary>
+    Public Function CreatePendingReset(email As String, token As String,
+                                       salt As String, secret As String,
+                                       expires As Date) As PendingRegistrationRecord
+        Dim record As New PendingRegistrationRecord
+
+        SyncLock sync
+            Dim id As Long = nextId("pending_resets")
+            Dim now As Date = Date.UtcNow
+
+            Call exec(
+                "INSERT INTO pending_resets (id, email, token, salt, secret, created, expires) VALUES (" &
+                $"{id}, '{esc(email.Trim().ToLowerInvariant())}', '{esc(token)}', '{esc(salt)}', '{esc(secret)}', {dateLiteral(now)}, {dateLiteral(expires)})")
+
+            record.id = id
+            record.email = email
+            record.token = token
+            record.salt = salt
+            record.secret = secret
+            record.created = now
+            record.expires = expires
+        End SyncLock
+
+        Return record
+    End Function
+
+#End Region
+
+    ''' <summary>
+    ''' look up a pending secret reset request by its reset token.
+    ''' </summary>
+    Public Function GetPendingReset(token As String) As PendingRegistrationRecord
+        If String.IsNullOrEmpty(token) Then
+            Return Nothing
+        End If
+
+        SyncLock sync
+            Dim rs As ResultSet = query($"SELECT id, email, token, salt, secret, created, expires FROM pending_resets WHERE token = '{esc(token)}'")
+
+            If rs Is Nothing OrElse Not rs.IsQuery Then
+                Return Nothing
+            End If
+
+            For Each row As Object() In rs.Rows
+                If String.Equals(toStr(row(2)), token, StringComparison.Ordinal) Then
+                    Return New PendingRegistrationRecord With {
+                        .id = toLong(row(0)),
+                        .email = toStr(row(1)),
+                        .token = toStr(row(2)),
+                        .salt = toStr(row(3)),
+                        .secret = toStr(row(4)),
+                        .created = toDate(row(5)),
+                        .expires = toDate(row(6))
+                    }
+                End If
+            Next
+        End SyncLock
+
+        Return Nothing
+    End Function
+
+    ''' <summary>
+    ''' remove one pending secret reset request (orphan cleanup after a failed
+    ''' reset mail delivery).
+    ''' </summary>
+    Public Sub DeletePendingReset(id As Long)
+        SyncLock sync
+            Call exec($"DELETE FROM pending_resets WHERE id = {id}")
+        End SyncLock
+    End Sub
+
+    ''' <summary>
+    ''' remove every pending secret reset request whose reset link has expired.
+    ''' </summary>
+    Public Sub DeleteExpiredResets()
+        SyncLock sync
+            Dim rs As ResultSet = query("SELECT id, expires FROM pending_resets")
+
+            If rs Is Nothing OrElse Not rs.IsQuery Then
+                Return
+            End If
+
+            For Each row As Object() In rs.Rows
+                If toDate(row(1)) < Date.UtcNow Then
+                    Call exec($"DELETE FROM pending_resets WHERE id = {toLong(row(0))}")
                 End If
             Next
         End SyncLock

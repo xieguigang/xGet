@@ -511,9 +511,13 @@ Public Class Service
         End If
 
         ' an already verified account is never registered twice: the TOTP secret
-        ' is never returned over the wire anymore.
+        ' is never returned over the wire anymore. a lost authorization code is
+        ' recovered through the self service secret reset flow.
         If store.GetUser(email) IsNot Nothing Then
-            writeResult(res, True, "this email address is already registered on this server.", New Dictionary(Of String, Object) From {
+            writeResult(res, True, "this email address is already registered on this server. " &
+                                   "if you have lost your local authorization code, run " &
+                                   "'xGet reset --server <server-url> --email <email>' to receive a fresh one by mail.",
+                        New Dictionary(Of String, Object) From {
                 {"warning", "already-registered"}
             })
             Return
@@ -565,6 +569,7 @@ Public Class Service
     ''' valid, the pending registration becomes a real account and the page
     ''' displays the base64 authorization code (email + server url + TOTP
     ''' secret) which the new user saves locally through ``xGet activate``.
+    ''' the link is replayable while it is valid.
     ''' </summary>
     <HttpGet("/api/verify")>
     Public Sub VerifyEmail(req As HttpRequest, res As HttpResponse)
@@ -582,7 +587,8 @@ Public Class Service
         If pending Is Nothing Then
             Call "email verification failed: the token was not found".warning()
             Call writeHtml(res, MailService.RenderVerifyFailed(config.TemplateDirectory,
-                "the verification link is invalid or it was already used.", serverUrl))
+                "the verification link is invalid or it has expired. if the link has expired, " &
+                "run 'xGet reset --server " & serverUrl & " --email your@mail.address' to receive a fresh one.", serverUrl))
             Return
         End If
 
@@ -590,7 +596,9 @@ Public Class Service
             Call store.DeletePendingRegistration(pending.id)
             Call $"email verification failed: the token of '{pending.email}' has expired".warning()
             Call writeHtml(res, MailService.RenderVerifyFailed(config.TemplateDirectory,
-                "the verification link has expired (the validity window is 30 minutes).", serverUrl))
+                "the verification link has expired (the validity window is 30 minutes). " &
+                "run 'xGet reset --server " & serverUrl & " --email " & pending.email &
+                "' to receive a fresh authorization code.", serverUrl))
             Return
         End If
 
@@ -600,7 +608,8 @@ Public Class Service
             Call $"a new account was verified and activated: {pending.email}".info()
         End If
 
-        Call store.DeletePendingRegistration(pending.id)
+        ' the pending record is kept until it expires so that the user can open
+        ' the mail link again when the authorization code was not copied
         Call store.DeleteExpiredRegistrations()
 
         ' the base64 authorization payload: email + server url + totp secret
@@ -614,6 +623,129 @@ Public Class Service
 
         Call writeHtml(res, MailService.RenderVerifySuccess(config.TemplateDirectory, pending.email, payload, activateCommand, serverUrl))
     End Sub
+
+    ''' <summary>
+    ''' the self service totp secret reset request: a fresh salt/secret pair is
+    ''' generated and its activation link is mailed to the account address. the
+    ''' old secret keeps working until the reset link is opened.
+    ''' </summary>
+    <HttpPost("/api/reset")>
+    Public Sub RequestSecretReset(req As HttpPOSTRequest, res As HttpResponse)
+        Dim email As String = argument(req, "email")
+
+        If String.IsNullOrEmpty(email) Then
+            res.WriteError(HTTP_RFC.RFC_BAD_REQUEST, "the email argument is required")
+            Return
+        End If
+
+        Call store.DeleteExpiredResets()
+
+        If store.GetUser(email) Is Nothing Then
+            writeResult(res, False, "this email address is not registered on this server.",
+                        New Dictionary(Of String, Object) From {
+                {"warning", "not-registered"}
+            })
+            Return
+        End If
+
+        ' throttle the reset mails: one mailbox can not be flooded with them
+        If store.HasPendingReset(email) Then
+            writeResult(res, True, "a reset mail was already sent to this address and is still valid. " &
+                                   "please open the link from your mailbox.",
+                        New Dictionary(Of String, Object) From {
+                {"warning", "reset-already-pending"}
+            })
+            Return
+        End If
+
+        Dim salt As String = TotpAuth.GenerateSalt(TotpAuth.SaltLength)
+        Dim secret As String = TotpModule.Base32Encode(TotpAuth.DeriveSecret(email, salt))
+        Dim token As String = generateToken()
+        Dim expires As Date = Date.UtcNow.AddMinutes(config.VerifyTtlMinutes)
+
+        Call store.CreatePendingReset(email, token, salt, secret, expires)
+
+        Dim serverUrl As String = getBaseUrl(req)
+        Dim resetUrl As String = $"{serverUrl}/api/reset-activate?token={Uri.EscapeDataString(token)}"
+        Dim body As String = MailService.RenderResetEmail(config.TemplateDirectory, email, resetUrl, serverUrl, config.VerifyTtlMinutes)
+        Dim mailError As String = ""
+
+        If Not MailService.Send(MailService.LoadConfig(store, config.DataDirectory), email,
+                                $"reset your nuget authorization on {serverUrl}", body, mailError) Then
+            ' the pending record would never be received by the user, so it is
+            ' removed right away instead of blocking the mailbox
+            Dim orphan As PendingRegistrationRecord = store.GetPendingReset(token)
+
+            If orphan IsNot Nothing Then
+                Call store.DeletePendingReset(orphan.id)
+            End If
+
+            Call $"the secret reset mail to '{email}' could not be sent: {mailError}".warning()
+            res.WriteError(HTTP_RFC.RFC_INTERNAL_SERVER_ERROR, $"the reset email could not be sent: {mailError}")
+            Return
+        End If
+
+        Call $"a secret reset mail was sent to '{email}' (valid for {config.VerifyTtlMinutes} minutes)".info()
+
+        writeResult(res, True, $"a reset link has been sent to {email}; the link is valid for {config.VerifyTtlMinutes} minutes. " &
+                               "open the link, then save the new base64 authorization code with 'xGet activate'.",
+                    New Dictionary(Of String, Object) From {
+            {"email", email},
+            {"warning", "check-your-mailbox"}
+        })
+    End Sub
+
+    ''' <summary>
+    ''' the self service reset activation page: opening the mailed link replaces
+    ''' the old totp secret of the account and displays the new base64
+    ''' authorization code. the link is replayable while it is valid.
+    ''' </summary>
+    <HttpGet("/api/reset-activate")>
+    Public Sub ResetActivate(req As HttpRequest, res As HttpResponse)
+        Dim token As String = queryValue(req, "token")
+        Dim serverUrl As String = getBaseUrl(req)
+
+        If token.StringEmpty() Then
+            Call writeHtml(res, MailService.RenderVerifyFailed(config.TemplateDirectory,
+                "the reset link is invalid: the token is missing.", serverUrl))
+            Return
+        End If
+
+        Dim pending As PendingRegistrationRecord = store.GetPendingReset(token)
+
+        If pending Is Nothing Then
+            Call "secret reset failed: the token was not found".warning()
+            Call writeHtml(res, MailService.RenderVerifyFailed(config.TemplateDirectory,
+                "the reset link is invalid or it has expired. run 'xGet reset --server " & serverUrl &
+                " --email your@mail.address' to receive a fresh one.", serverUrl))
+            Return
+        End If
+
+        If pending.IsExpired Then
+            Call store.DeletePendingReset(pending.id)
+            Call $"secret reset failed: the token of '{pending.email}' has expired".warning()
+            Call writeHtml(res, MailService.RenderVerifyFailed(config.TemplateDirectory,
+                "the reset link has expired (the validity window is 30 minutes). " &
+                "run 'xGet reset --server " & serverUrl & " --email " & pending.email &
+                "' to receive a fresh authorization code.", serverUrl))
+            Return
+        End If
+
+        ' the new secret becomes active right away: the old one stops working
+        Call store.UpdateUserSecret(pending.email, pending.salt, pending.secret)
+        Call $"the totp secret of '{pending.email}' was reset through the self service flow".info()
+
+        Dim payloadJson As String = JsonSerializer.Serialize(New Dictionary(Of String, String) From {
+            {"email", pending.email},
+            {"server", serverUrl},
+            {"secret", pending.secret}
+        }, JsonOptions)
+        Dim payload As String = Convert.ToBase64String(Encoding.UTF8.GetBytes(payloadJson))
+        Dim activateCommand As String = $"xGet activate --server {serverUrl} --email {pending.email} --code {payload}"
+
+        Call writeHtml(res, MailService.RenderVerifySuccess(config.TemplateDirectory, pending.email, payload, activateCommand, serverUrl))
+    End Sub
+
 
     ''' <summary>
     ''' a cryptographically secure random 256 bit hex verification token.

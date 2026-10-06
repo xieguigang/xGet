@@ -17,7 +17,8 @@ Module Program
         vbCrLf &
         "usage:" & vbCrLf &
         "  xGet register --server <url> --email <email>" & vbCrLf &
-        "  xGet activate --server <url> --email <email> --code <base64 authorization code>" & vbCrLf &
+        "  xGet activate --server <url> --email <email> --code <base64 authorization code>
+  xGet reset    --server <url> --email <email>  (mails a fresh authorization code)" & vbCrLf &
         "  xGet upload   --server <url> --email <email> --file <package.nupkg> [--timeout <minutes>]" & vbCrLf &
         "  xGet batch    --server <url> --email <email> --dir <folder> [--recursive] [--symbols] [--timeout <minutes>]" & vbCrLf &
         vbCrLf &
@@ -49,6 +50,8 @@ Module Program
         Select Case command
             Case "register", "reg"
                 Return register(options)
+            Case "reset"
+                Return reset(options)
             Case "activate", "active", "login"
                 Return activate(options)
             Case "upload", "push"
@@ -90,6 +93,18 @@ Module Program
 
         ' the server has no smtp account configured yet: the verification mail
         ' can not be sent, the user has to remind the server administrator.
+        ' the account already exists: the fresh authorization code is recovered
+        ' through the self service reset flow instead of the registration.
+        If result.warning = "already-registered" Then
+            Call Console.WriteLine(result.message)
+            Call Console.WriteLine()
+            Call Console.WriteLine("next steps:")
+            Call Console.WriteLine("  1. if you still have the local authorization code of this account, keep using it;")
+            Call Console.WriteLine("  2. otherwise request a fresh one by mail:")
+            Call Console.WriteLine("     xGet reset --server " + normalizeServer(server) + " --email " + email)
+            Return 0
+        End If
+
         If result.warning = "mail-not-configured" Then
             Call Console.WriteLine("WARNING: the mail server of the nuget server is not configured yet,")
             Call Console.WriteLine("         so the verification email can not be sent.")
@@ -108,6 +123,52 @@ Module Program
         Call Console.WriteLine("next steps:")
         Call Console.WriteLine("  1. open the verification link in your mailbox (it is valid for 30 minutes);")
         Call Console.WriteLine("  2. copy the base64 authorization code from the verification success page;")
+        Call Console.WriteLine("  3. save it locally with:")
+        Call Console.WriteLine($"     xGet activate --server {normalizeServer(server)} --email {email} --code <the base64 code>")
+        Return 0
+    End Function
+
+    ''' <summary>
+    ''' ask the server to mail a fresh authorization code for the given email:
+    ''' the recovery path for an account whose local TOTP secret was lost.
+    ''' </summary>
+    Private Function reset(options As Dictionary(Of String, String)) As Integer
+        Dim server As String = getOption(options, "server", "s")
+        Dim email As String = getOption(options, "email", "e")
+
+        If String.IsNullOrEmpty(server) OrElse String.IsNullOrEmpty(email) Then
+            Call Console.WriteLine("usage: xGet reset --server <url> --email <email>")
+            Return 1
+        End If
+
+        Dim client As New NugetApiClient(server)
+        Dim result As ApiResult = client.RequestReset(email)
+
+        If result Is Nothing Then
+            Call Console.WriteLine("reset failed: unknown error")
+            Return 2
+        End If
+
+        If Not result.ok Then
+            Call Console.WriteLine($"reset failed: {If(result.message, "unknown error")}")
+            Return 2
+        End If
+
+        Call Console.WriteLine(result.message)
+        Call Console.WriteLine()
+
+        If result.warning = "reset-already-pending" Then
+            Call Console.WriteLine("next steps:")
+            Call Console.WriteLine("  1. open the reset link which was mailed to you earlier (it is still valid);")
+            Call Console.WriteLine("  2. copy the base64 authorization code from the reset page;")
+            Call Console.WriteLine("  3. save it locally with:")
+            Call Console.WriteLine($"     xGet activate --server {normalizeServer(server)} --email {email} --code <the base64 code>")
+            Return 0
+        End If
+
+        Call Console.WriteLine("next steps:")
+        Call Console.WriteLine("  1. open the reset link in your mailbox (it is valid for 30 minutes);")
+        Call Console.WriteLine("  2. copy the new base64 authorization code from the reset page;")
         Call Console.WriteLine("  3. save it locally with:")
         Call Console.WriteLine($"     xGet activate --server {normalizeServer(server)} --email {email} --code <the base64 code>")
         Return 0

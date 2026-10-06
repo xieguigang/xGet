@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TOTP secret reset</title>
+</head>
+<body style="margin:0;padding:40px 16px;background:#F5F7FB;font-family:'Segoe UI',Helvetica,Arial,sans-serif;">
+  <div style="max-width:640px;margin:0 auto;background:#FFFFFF;border-radius:12px;padding:36px;box-shadow:0 4px 24px rgba(6,46,154,0.08);">
+    <div style="width:52px;height:52px;border-radius:50%;background:#062E9A;color:#FFFFFF;font-size:26px;line-height:52px;text-align:center;">&#128273;</div>
+    <h1 style="margin:18px 0 8px;color:#1F2937;font-size:24px;font-weight:600;">Reset your nuget authorization</h1>
+    <p style="margin:0 0 20px;color:#6B7280;font-size:14px;">
+      a secret reset was requested for the account <b>{{email}}</b> on {{server}}.
+      open the button below to receive a <b>new base64 authorization code</b>: the old
+      TOTP secret stops working as soon as the reset page is opened.
+    </p>
+    <p style="margin:0 0 24px;text-align:center;">
+      <a href="{{reset_url}}" style="display:inline-block;padding:12px 28px;background:#062E9A;color:#FFFFFF;border-radius:8px;font-size:15px;font-weight:600;text-decoration:none;">Open the reset page</a>
+    </p>
+    <p style="margin:0 0 8px;color:#1F2937;font-size:14px;font-weight:500;">if the button does not work, copy this url into your browser:</p>
+    <pre style="margin:0 0 20px;padding:14px;background:#F3F4F6;color:#062E9A;border-radius:8px;font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap;word-break:break-all;">{{reset_url_text}}</pre>
+    <div style="margin:0 0 20px;padding:14px 16px;background:#F3F4F6;border-radius:8px;color:#1F2937;font-size:14px;line-height:1.6;">
+      <b>what to do next</b><br />
+      1. open the reset link (valid for <b>{{ttl}} minutes</b>);<br />
+      2. copy the base64 authorization code from the reset page;<br />
+      3. save it locally with:
+    </div>
+    <pre style="margin:0 0 20px;padding:14px;background:#1F2937;color:#D1FAE5;border-radius:8px;font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap;word-break:break-all;">xGet activate --server {{server}} --email {{email}} --code &lt;the base64 code&gt;</pre>
+    <p style="margin:0;color:#9CA3AF;font-size:12px;">
+      if you did not request this reset, simply ignore this mail: your current
+      authorization keeps working until the reset link is opened.
+    </p>
+  </div>
+</body>
+</html>

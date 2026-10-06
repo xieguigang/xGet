@@ -12,11 +12,12 @@
     <p style="margin:0 0 20px;color:#6B7280;font-size:14px;">{{reason}}</p>
     <div style="margin:0 0 20px;padding:14px 16px;background:#F3F4F6;border-radius:8px;color:#1F2937;font-size:14px;line-height:1.6;">
       <b>what to do next</b><br />
-      the email verification link is valid for <b>30 minutes</b> and can be used only once.
-      please run the registration command again to receive a new verification mail,
-      then open the fresh link from your mailbox within the validity window:
+      the email verification link is valid for <b>30 minutes</b>: while the link is
+      still valid you can simply open it again from your mailbox and the page will
+      show the base64 authorization code. if the link has expired, request a new
+      one with the reset command below (a fresh link will be sent to your mailbox):
     </div>
-    <pre style="margin:0 0 20px;padding:14px;background:#1F2937;color:#D1FAE5;border-radius:8px;font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap;word-break:break-all;">xGet register --server {{server}} --email your@mail.address</pre>
+    <pre style="margin:0 0 20px;padding:14px;background:#1F2937;color:#D1FAE5;border-radius:8px;font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap;word-break:break-all;">xGet reset --server {{server}} --email your@mail.address</pre>
     <p style="margin:0;color:#9CA3AF;font-size:12px;">
       if the problem persists, contact the server administrator or visit
       <a href="{{server}}" style="color:#062E9A;">{{server}}</a>.

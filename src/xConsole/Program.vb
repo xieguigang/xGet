@@ -71,6 +71,9 @@ Module Program
     ''' <summary>the ``--yes`` flag which skips every confirmation prompt.</summary>
     Private assumeYes As Boolean = False
 
+    ''' <summary>show the untruncated cell values of the tables command (--full).</summary>
+    Private fullValues As Boolean = False
+
     Function Main(args As String()) As Integer
         If args Is Nothing OrElse args.Length = 0 Then
             Call printUsage()
@@ -134,6 +137,7 @@ Module Program
     ''' listed; with a table name the rows are printed as a text table page.
     ''' </summary>
     Private Function tables(positional As List(Of String), options As Dictionary(Of String, String)) As Integer
+        fullValues = options.ContainsKey("full")
         If positional.Count = 0 Then
             Call Console.WriteLine("the database tables:")
             Call Console.WriteLine()
@@ -203,7 +207,7 @@ Module Program
         For i As Integer = 0 To widths.Length - 1
             Dim text As String = If(i < cells.Length, cells(i), "")
 
-            If text.Length > 48 Then
+            If text.Length > 48 AndAlso Not fullValues Then
                 text = text.Substring(0, 45) & "..."
             End If
 
