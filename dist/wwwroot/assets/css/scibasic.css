@@ -875,6 +875,30 @@ a.chip:hover {
     user-select: none;
 }
 
+/* the obsolete package state badge (neutral): it marks a package which its
+   owner no longer recommends, while the package is still served */
+.obsolete-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border: 1px solid var(--ink-ghost);
+    border-radius: 999px;
+    background: var(--panel-3);
+    background: color-mix(in srgb, var(--ink-ghost) 14%, transparent);
+    color: var(--ink-faint);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    line-height: 1.5;
+    white-space: nowrap;
+    user-select: none;
+}
+
+/* the author ``display`` rule above would otherwise defeat the ``hidden``
+   attribute which the detail page toggles */
+.obsolete-badge[hidden] {
+    display: none;
+}
+
 /* the uploader email link of the package facts row */
 .user-link {
     color: var(--ink);

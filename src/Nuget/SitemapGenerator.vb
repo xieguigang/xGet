@@ -122,16 +122,59 @@ Public Module SitemapGenerator
                 "the sitemap can not be generated because neither 'sitemap-base-url' nor 'base-url' is configured.")
         End If
 
-        Dim packages As List(Of PackageRecord) = store.ReadAllPackages()
-        Dim docs As List(Of PackageApiDocRecord) = store.ReadApiDocIndex()
+        Dim allPackages As List(Of PackageRecord) = store.ReadAllPackages()
+        Dim allDocs As List(Of PackageApiDocRecord) = store.ReadApiDocIndex(includeHidden:=True)
+
+        ' the hidden packages may neither be crawled nor indexed: their detail
+        ' page and their api document pages are dropped from the url set, while
+        ' the fingerprint below still covers the whole database, so that hiding
+        ' a package triggers a rebuild of the site map.
+        Dim hidden As HashSet(Of String) = store.GetHiddenPackageIds()
+        Dim packages As List(Of PackageRecord) = allPackages _
+            .Where(Function(p) p.package_id IsNot Nothing AndAlso
+                                Not hidden.Contains(p.package_id.Trim().ToLowerInvariant())) _
+            .ToList()
+        Dim docs As List(Of PackageApiDocRecord) = allDocs _
+            .Where(Function(r) r.package_id IsNot Nothing AndAlso
+                                Not hidden.Contains(r.package_id.Trim().ToLowerInvariant())) _
+            .ToList()
+
         Dim entries As List(Of SitemapEntry) = Collect(config, baseUrl, packages, docs, timestamp)
 
         Return New SitemapBuild With {
             .xml = render(baseUrl, entries),
-            .fingerprint = fingerprint(packages, docs),
+            .fingerprint = databaseFingerprint(allPackages, allDocs, hidden),
             .urlCount = entries.Count,
             .docCount = entries.Where(Function(e) String.Equals(e.kind, "docs", StringComparison.Ordinal)).Count()
         }
+    End Function
+
+    ''' <summary>
+    ''' the fingerprint of the whole document database, including the set of the
+    ''' hidden packages. the site map build and the change detection of the
+    ''' schedule must compute the very same value, otherwise the site map would
+    ''' either be rebuilt on every idle window or never follow a change.
+    ''' </summary>
+    ''' <param name="packages">every package version of the database, hidden ones included.</param>
+    ''' <param name="docs">every api document index row, hidden ones included.</param>
+    ''' <param name="hidden">the hidden package ids (lower case).</param>
+    Private Function databaseFingerprint(packages As List(Of PackageRecord),
+                                         docs As List(Of PackageApiDocRecord),
+                                         hidden As HashSet(Of String)) As String
+        Return fingerprint(packages, docs) & ";hidden=" & hiddenFingerprint(hidden)
+    End Function
+
+    ''' <summary>
+    ''' the fingerprint component of the hidden package set: it changes whenever a
+    ''' package is hidden or unhidden, so that the site map is regenerated.
+    ''' </summary>
+    ''' <param name="hidden">the hidden package ids (lower case).</param>
+    Private Function hiddenFingerprint(hidden As HashSet(Of String)) As String
+        If hidden Is Nothing OrElse hidden.Count = 0 Then
+            Return "0"
+        End If
+
+        Return String.Join(",", hidden.OrderBy(Function(id) id, StringComparer.Ordinal))
     End Function
 
     ''' <summary>
@@ -231,7 +274,9 @@ Public Module SitemapGenerator
     ''' <param name="store"></param>
     ''' <returns></returns>
     Public Function Fingerprint(store As NugetStore) As String
-        Return fingerprint(store.ReadAllPackages(), store.ReadApiDocIndex())
+        Return databaseFingerprint(store.ReadAllPackages(),
+                                   store.ReadApiDocIndex(includeHidden:=True),
+                                   store.GetHiddenPackageIds())
     End Function
 
     ''' <summary>

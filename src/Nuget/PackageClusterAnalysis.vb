@@ -97,7 +97,9 @@ Public Module PackageClusterAnalysis
     ''' <param name="forceK">a k which overrides the configured value; 0 to honor the configuration.</param>
     Public Function RunIfChanged(store As NugetStore, config As NugetConfiguration, Optional forceK As Integer = 0) As AnalysisSummary
         SyncLock analysisSync
-            Dim latest As List(Of PackageRecord) = NugetStatistics.LatestPackages(store.ReadAllPackages())
+            ' only the publicly visible packages take part in the analysis, so a
+            ' hidden package can not be reached through the cluster graph either
+            Dim latest As List(Of PackageRecord) = NugetStatistics.LatestPackages(store.ReadVisiblePackages())
             Dim fingerprint As String = ComputeFingerprint(latest)
             Dim k As Integer = If(forceK > 0, forceK, config.ClusterK)
 

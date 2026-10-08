@@ -48,6 +48,9 @@ Module Program
         "  mail clear                 remove the stored smtp configuration" & vbCrLf &
         "  db checkpoint [--force]    merge the pending write ahead logs" & vbCrLf &
         "  cluster rebuild [--k N]    re-run the package umap + kmeans cluster analysis" & vbCrLf &
+        "  package list               list the packages with their obsolete / hidden state" & vbCrLf &
+        "  package obsolete <id> <on|off>  mark or unmark a package as obsolete" & vbCrLf &
+        "  package hide <id> <on|off>      hide or unhide a package from every public view" & vbCrLf &
         vbCrLf &
         "mail set options:" & vbCrLf &
         "  --host <host>    the smtp server host (required)" & vbCrLf &
@@ -123,6 +126,8 @@ Module Program
                 Return db(positional, options)
             Case "cluster", "clusters"
                 Return cluster(options)
+            Case "package", "packages", "pkg"
+                Return package(positional, options)
             Case Else
                 Call Console.WriteLine($"unknown command: {args(0)}")
                 Call printUsage()
@@ -351,6 +356,104 @@ Module Program
         ' also report the account when it does not exist yet
         If store.GetUser(email) Is Nothing Then
             Call Console.WriteLine("note: this email has no registered account yet, the flag will apply after the registration.")
+        End If
+
+        Return 0
+    End Function
+
+    ''' <summary>
+    ''' the ``package`` command group: browse the packages with their public
+    ''' flags, and mark or unmark one package id as obsolete / hidden. the flags
+    ''' are written straight into the ``package_flags`` table of the server
+    ''' database, which the running server reads on every request.
+    ''' </summary>
+    Private Function package(positional As List(Of String), options As Dictionary(Of String, String)) As Integer
+        Dim action As String = If(positional.Count > 0, positional(0).ToLowerInvariant(), "list")
+
+        Select Case action
+            Case "list", "ls"
+                Dim all As List(Of PackageRecord) = store.ReadAllPackages()
+                Dim ids As List(Of String) = all _
+                    .Where(Function(p) Not String.IsNullOrEmpty(p.package_id)) _
+                    .Select(Function(p) p.package_id.ToLowerInvariant()) _
+                    .Distinct(StringComparer.OrdinalIgnoreCase) _
+                    .OrderBy(Function(id) id, StringComparer.OrdinalIgnoreCase) _
+                    .ToList()
+
+                Call Console.WriteLine($"packages: {ids.Count}")
+                Call Console.WriteLine()
+
+                For Each id As String In ids
+                    Dim flags As PackageFlagRecord = store.GetPackageFlags(id)
+                    Dim versions As Integer = all.Where(Function(p) String.Equals(p.package_id, id, StringComparison.OrdinalIgnoreCase)).Count()
+                    Dim owner As String = store.GetPackageUploader(id)
+
+                    Call Console.WriteLine($"  {id}")
+                    Call Console.WriteLine($"      versions: {versions}   obsolete: {If(flags.obsolete, "yes", "no")}   hidden: {If(flags.hidden, "yes", "no")}")
+                    Call Console.WriteLine($"      uploader: {If(String.IsNullOrEmpty(owner), "(not recorded)", owner)}")
+                Next
+
+                Return 0
+
+            Case "obsolete", "deprecate"
+                Return setPackageFlagAction(positional, "obsolete")
+
+            Case "hide", "hidden", "unlist"
+                Return setPackageFlagAction(positional, "hidden")
+
+            Case Else
+                Call Console.WriteLine($"unknown package action: '{action}'")
+                Call Console.WriteLine("available actions: list, obsolete, hide")
+                Return 1
+        End Select
+    End Function
+
+    ''' <summary>
+    ''' the shared implementation of the ``package obsolete`` and ``package
+    ''' hide`` flag actions.
+    ''' </summary>
+    Private Function setPackageFlagAction(positional As List(Of String), flagName As String) As Integer
+        If positional.Count < 3 Then
+            Call Console.WriteLine($"usage: xConsole package {flagName} <id> <on|off>")
+            Return 1
+        End If
+
+        Dim packageId As String = positional(1).Trim()
+        Dim flagText As String = positional(2).ToLowerInvariant()
+        Dim flag As Boolean
+
+        If flagText = "on" OrElse flagText = "true" OrElse flagText = "yes" Then
+            flag = True
+        ElseIf flagText = "off" OrElse flagText = "false" OrElse flagText = "no" Then
+            flag = False
+        Else
+            Call Console.WriteLine($"invalid flag value: '{flagText}' (on or off is expected)")
+            Return 1
+        End If
+
+        If Not store.PackageIdExists(packageId) Then
+            Call Console.WriteLine($"package not found: '{packageId}'")
+            Return 1
+        End If
+
+        Call store.SetPackageFlag(packageId, flagName, flag)
+
+        Dim flags As PackageFlagRecord = store.GetPackageFlags(packageId)
+
+        If flagName = "obsolete" Then
+            Call Console.WriteLine($"the package '{packageId}' is {(If(flag, "now marked as", "no longer marked as"))} obsolete.")
+        ElseIf flag Then
+            Call Console.WriteLine($"the package '{packageId}' is now hidden: it is not listed, searchable, downloadable nor documented anymore.")
+        Else
+            Call Console.WriteLine($"the package '{packageId}' is visible again.")
+        End If
+
+        Call Console.WriteLine($"      obsolete: {If(flags.obsolete, "yes", "no")}   hidden: {If(flags.hidden, "yes", "no")}")
+
+        If flagName = "hidden" AndAlso flag Then
+            Call Console.WriteLine("note: a running server applies the flag to every request right away, but the package")
+            Call Console.WriteLine("      files it has already mapped into its static file system need a restart to")
+            Call Console.WriteLine("      disappear from the '/packages/...' urls.")
         End If
 
         Return 0

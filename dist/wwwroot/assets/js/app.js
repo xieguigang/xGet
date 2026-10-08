@@ -609,6 +609,9 @@
 
             return '<tr class="row-link" data-id="' + esc(encodeURIComponent(id)) + '">' +
                 '<td><span class="pkg-name">' + esc(id) + '</span>' +
+                (pkg.obsolete
+                    ? ' <span class="obsolete-badge" title="this package is marked as obsolete by its owner">obsolete</span>'
+                    : '') +
                 '<span class="pkg-desc">' + esc(pkg.description || '—') + '</span>' +
                 (pkg.latestVersion
                     ? '<span class="ver pkg-ver">' + esc(pkg.latestVersion) + '</span>'
@@ -713,6 +716,19 @@
         node.innerHTML = html;
     }
 
+    /* the package level state badge: it shows the ``obsolete`` marker which the
+       owner of the package (or the server administrator) has set. the marker
+       lives beside the version meta row of the hero, because it describes the
+       package itself and not its uploader account. */
+    function renderObsoleteBadge(pkg) {
+        var node = $('pkg-obsolete-badge');
+        if (!node) {
+            return;
+        }
+
+        node.hidden = !pkg.obsolete;
+    }
+
     function renderPackageDetail(pkg) {
         document.title = (pkg.id || 'package') + ' · nuget';
 
@@ -736,6 +752,7 @@
         setText('pkg-downloads', formatNumber(pkg.totalDownloads));
         setText('pkg-versions', formatNumber((pkg.versions || []).length));
         setText('pkg-published', formatDate(pkg.published));
+        renderObsoleteBadge(pkg);
         renderClusterLabel(pkg.cluster);
         renderDocsLink(pkg);
 
