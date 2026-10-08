@@ -68,6 +68,31 @@ Public Class UserFlagRecord
 End Class
 
 ''' <summary>
+''' the two public state flags of one package id: the ``obsolete`` marker (the
+''' package is no longer recommended, but it is still served and documented)
+''' and the ``hidden`` marker (the package is completely withdrawn from every
+''' public view of the server).
+''' </summary>
+''' <remarks>
+''' the flags live in their own table because the JSql engine has no
+''' ``ALTER TABLE`` statement, so a new column can not be appended to the
+''' ``packages`` table of an existing database.
+''' </remarks>
+Public Class PackageFlagRecord
+    ''' <summary>the package id, always stored in its lower-case form.</summary>
+    Public Property package_id As String
+
+    ''' <summary>whether the package id is marked as obsolete.</summary>
+    Public Property obsolete As Boolean
+
+    ''' <summary>whether the package id is hidden from every public view.</summary>
+    Public Property hidden As Boolean
+
+    ''' <summary>the time of the last flag change.</summary>
+    Public Property updated As Date
+End Class
+
+''' <summary>
 ''' one distinct project url of the packages of one account, with the count of
 ''' the packages that point to it.
 ''' </summary>
@@ -111,6 +136,12 @@ Public Class PackageSummary
     Public Property total_downloads As Long
     Public Property versions As Integer
     Public Property published As Date
+
+    ''' <summary>
+    ''' whether the package id is marked as obsolete, so that the web front end
+    ''' can render its obsolete badge.
+    ''' </summary>
+    Public Property obsolete As Boolean
 End Class
 
 ''' <summary>
@@ -248,7 +279,8 @@ Public Class NugetStore
         "users", "packages", "statistics", "package_tags", "package_dependencies",
         "package_metadata", "package_activity", "package_doc_activity",
         "package_clusters", "package_api_docs", "user_flags", "package_uploaders",
-        "pending_registrations", "pending_resets", "email_blacklist", "server_settings"
+        "pending_registrations", "pending_resets", "email_blacklist", "server_settings",
+        "package_flags"
     }
 
     Private Sub initialize()
@@ -356,6 +388,14 @@ Public Class NugetStore
                 "  banned BOOLEAN DEFAULT FALSE," &
                 "  updated DATETIME" &
                 ") COMMENT='per user admin flags (official/demo/banned)'")
+            Call engine.Execute(
+                "CREATE TABLE IF NOT EXISTS package_flags (" &
+                "  id INT NOT NULL PRIMARY KEY," &
+                "  package_id VARCHAR(200) NOT NULL," &
+                "  obsolete BOOLEAN DEFAULT FALSE," &
+                "  hidden BOOLEAN DEFAULT FALSE," &
+                "  updated DATETIME" &
+                ") COMMENT='per package public flags (obsolete/hidden)'")
             Call engine.Execute(
                 "CREATE TABLE IF NOT EXISTS package_uploaders (" &
                 "  id INT NOT NULL PRIMARY KEY," &
@@ -843,6 +883,13 @@ Public Class NugetStore
 
 #Region "packages"
 
+    ''' <summary>
+    ''' read every package version of the feed, including the hidden ones. the
+    ''' administrative readers use it: the ``xConsole`` table browser, the
+    ''' sitemap fingerprint and the statistics rebuild. every public view of the
+    ''' server goes through <see cref="ReadVisiblePackages"/> instead, so that a
+    ''' hidden package is never exposed.
+    ''' </summary>
     Public Function ReadAllPackages() As List(Of PackageRecord)
         SyncLock sync
             Dim rs As ResultSet = query("SELECT * FROM packages")
@@ -850,22 +897,54 @@ Public Class NugetStore
         End SyncLock
     End Function
 
+    ''' <summary>
+    ''' read every package version which is not hidden: the single source of the
+    ''' public package data of the server.
+    ''' </summary>
+    ''' <returns>the visible package versions, in database order.</returns>
+    Public Function ReadVisiblePackages() As List(Of PackageRecord)
+        SyncLock sync
+            Dim hidden As HashSet(Of String) = hiddenPackageIdsNoLock()
+
+            Return ReadAllPackages() _
+                .Where(Function(p) p.package_id IsNot Nothing AndAlso
+                                    Not hidden.Contains(p.package_id.Trim().ToLowerInvariant())) _
+                .ToList()
+        End SyncLock
+    End Function
+
+    ''' <summary>
+    ''' read every published version of one package id; a hidden package yields
+    ''' an empty list, so every nuget protocol endpoint answers it as not found.
+    ''' </summary>
     Public Function GetVersions(packageId As String) As List(Of PackageRecord)
-        Return ReadAllPackages() _
+        Return ReadVisiblePackages() _
             .Where(Function(p) p.package_id.Equals(packageId, StringComparison.OrdinalIgnoreCase)) _
             .OrderBy(Function(p) VersionKey(p.version)) _
             .ToList()
     End Function
 
+    ''' <summary>
+    ''' read one published package version; a hidden package yields
+    ''' <c>Nothing</c>.
+    ''' </summary>
     Public Function GetPackage(packageId As String, version As String) As PackageRecord
-        Return ReadAllPackages() _
+        Return ReadVisiblePackages() _
             .Where(Function(p) p.package_id.Equals(packageId, StringComparison.OrdinalIgnoreCase)) _
             .Where(Function(p) p.version.Equals(version, StringComparison.OrdinalIgnoreCase)) _
             .FirstOrDefault()
     End Function
 
+    ''' <summary>
+    ''' test whether the exact package version exists, ignoring the hidden flag:
+    ''' the upload path uses this raw test so that a hidden package version can
+    ''' not be published a second time.
+    ''' </summary>
     Public Function PackageExists(packageId As String, version As String) As Boolean
-        Return GetPackage(packageId, version) IsNot Nothing
+        Return ReadAllPackages() _
+            .Where(Function(p) p.package_id.Equals(packageId, StringComparison.OrdinalIgnoreCase)) _
+            .Where(Function(p) p.version.Equals(version, StringComparison.OrdinalIgnoreCase)) _
+            .Any()
     End Function
 
     Public Function AddPackage(pkg As PackageRecord) As PackageRecord
