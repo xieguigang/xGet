@@ -1815,17 +1815,47 @@ Public Class NugetStore
     ''' the hidden flag: the administrative flag operations use this raw test,
     ''' so that a hidden package can still be marked and unmarked.
     ''' </summary>
+    ''' <remarks>
+    ''' the id is compared in memory because the JSql string comparison is case
+    ''' sensitive, so a ``WHERE package_id = ...`` lookup would miss the stored
+    ''' spelling of the id.
+    ''' </remarks>
     Public Function PackageIdExists(packageId As String) As Boolean
+        Return Not ResolvePackageId(packageId).StringEmpty()
+    End Function
+
+    ''' <summary>
+    ''' resolve the stored spelling (the canonical casing) of a package id; an
+    ''' empty string means that no version of the id was ever published.
+    ''' </summary>
+    ''' <remarks>
+    ''' the id is compared in memory because the JSql string comparison is case
+    ''' sensitive, so a ``WHERE package_id = ...`` lookup would miss the stored
+    ''' spelling of the id.
+    ''' </remarks>
+    ''' <param name="packageId">the package id, compared case insensitively.</param>
+    ''' <returns>the stored package id, or an empty string.</returns>
+    Public Function ResolvePackageId(packageId As String) As String
+        Dim key As String = If(packageId, "").Trim()
+
+        If key.StringEmpty() Then
+            Return ""
+        End If
+
         SyncLock sync
-            Dim rs As ResultSet = query($"SELECT package_id FROM packages WHERE package_id = '{esc(packageId)}'")
+            Dim rs As ResultSet = query("SELECT package_id FROM packages")
+
             If rs IsNot Nothing AndAlso rs.IsQuery Then
                 For Each row As Object() In rs.Rows
-                    If String.Equals(toStr(row(0)), packageId, StringComparison.OrdinalIgnoreCase) Then
-                        Return True
+                    Dim stored As String = toStr(row(0)).Trim()
+
+                    If String.Equals(stored, key, StringComparison.OrdinalIgnoreCase) Then
+                        Return stored
                     End If
                 Next
             End If
-            Return False
+
+            Return ""
         End SyncLock
     End Function
 
@@ -2332,20 +2362,34 @@ Public Class NugetStore
     ''' <summary>
     ''' read the uploader account of the latest recorded version of a package.
     ''' </summary>
+    ''' <remarks>
+    ''' the package id is compared in memory because the JSql string comparison
+    ''' is case sensitive and the uploader row may carry another spelling of the
+    ''' package id than the ``packages`` row.
+    ''' </remarks>
     Public Function GetPackageUploader(packageId As String) As String
+        Dim key As String = If(packageId, "").Trim()
         Dim best As String = ""
         Dim bestVersion As String = ""
 
+        If key.StringEmpty() Then
+            Return ""
+        End If
+
         SyncLock sync
-            Dim rs As ResultSet = query($"SELECT version, email FROM package_uploaders WHERE package_id = '{esc(packageId)}'")
+            Dim rs As ResultSet = query("SELECT package_id, version, email FROM package_uploaders")
 
             If rs IsNot Nothing AndAlso rs.IsQuery Then
                 For Each row As Object() In rs.Rows
-                    Dim v As String = toStr(row(0))
+                    If Not String.Equals(toStr(row(0)).Trim(), key, StringComparison.OrdinalIgnoreCase) Then
+                        Continue For
+                    End If
+
+                    Dim v As String = toStr(row(1))
 
                     If bestVersion = "" OrElse VersionKey(v) > VersionKey(bestVersion) Then
                         bestVersion = v
-                        best = toStr(row(1))
+                        best = toStr(row(2))
                     End If
                 Next
             End If

@@ -326,8 +326,11 @@ Module Program
         Dim email As String = getOption(options, "email", "e")
         Dim id As String = getOption(options, "id", "package", "p", "name", "_1")
 
+        ' the command word of the hidden flag is ``hide``
+        Dim label As String = If(flagName = "hidden", "hide", flagName)
+
         If String.IsNullOrEmpty(server) OrElse String.IsNullOrEmpty(email) OrElse String.IsNullOrEmpty(id) Then
-            Call Console.WriteLine($"usage: xGet {flagName} --server <url> --email <email> --id <package-id> [--off]")
+            Call Console.WriteLine($"usage: xGet {label} --server <url> --email <email> --id <package-id> [--off]")
             Return 1
         End If
 
@@ -348,7 +351,7 @@ Module Program
         Dim result As ApiResult = client.SetPackageFlag(email, code, id, flagName, flag)
 
         If result Is Nothing OrElse Not result.ok Then
-            Call Console.WriteLine($"{flagName} failed: {If(result?.message, "unknown error")}")
+            Call Console.WriteLine($"{label} failed: {If(result?.message, "unknown error")}")
             Return 2
         End If
 

@@ -70,6 +70,11 @@ Public Class Service
         Me.store = New NugetStore(Me.config.DatabaseDirectory, Me.config.CreateStorageOptions())
         Me.auth = New TotpAuth(Me.store)
 
+        ' the host attaches the physical package folder to the ``/packages/`` urls
+        ' before this module is mounted, so the packages which are already hidden
+        ' are withdrawn from the static file system here as well
+        Call applyHiddenStaticFiles()
+
         Call $"nuget server data directory: {Me.config.DataDirectory}".info()
 
         Call registerStyleSheetMime()
@@ -951,10 +956,16 @@ Public Class Service
 
         id = id.Trim()
 
-        If Not store.PackageIdExists(id) Then
+        ' switch to the stored spelling of the id, so that the owner lookup below
+        ' is not affected by the case sensitivity of the JSql string comparison
+        Dim storedId As String = store.ResolvePackageId(id)
+
+        If storedId.StringEmpty() Then
             res.WriteError(HTTP_RFC.RFC_NOT_FOUND, $"package '{id}' was not found")
             Return
         End If
+
+        id = storedId
 
         If Not canManagePackage(id, email) Then
             Call $"package {flagName} rejected: '{email}' is not an owner of '{id}'".warning()
@@ -1039,7 +1050,7 @@ Public Class Service
     ''' </summary>
     ''' <param name="packageId">the package id whose flag changed.</param>
     Private Sub refreshHiddenPackageViews(packageId As String)
-        Call unregisterStaticFiles(packageId)
+        Call refreshStaticFiles(packageId)
         Call refreshStatistics()
 
         ' the document database did not change, but the set of the public urls
@@ -1047,6 +1058,57 @@ Public Class Service
         If sitemap IsNot Nothing Then
             Call sitemap.NotifyDocsChanged()
         End If
+    End Sub
+
+    ''' <summary>
+    ''' withdraw the static file mappings of every package which is hidden at the
+    ''' server start. the host attaches the physical package folder to the
+    ''' ``/packages/`` urls before this module is mounted, so the sanitizing has
+    ''' to run here as well and not only when a flag is changed at runtime.
+    ''' </summary>
+    Private Sub applyHiddenStaticFiles()
+        If router Is Nothing OrElse router.FileSystem Is Nothing Then
+            Return
+        End If
+
+        Dim hidden As HashSet(Of String) = store.GetHiddenPackageIds()
+
+        For Each id As String In hidden
+            Call unregisterStaticFiles(id)
+        Next
+
+        If hidden.Count > 0 Then
+            Call $"{hidden.Count} hidden package(s): their static package files were withdrawn".info()
+        End If
+    End Sub
+
+    ''' <summary>
+    ''' bring the static file mappings of one package in line with its hidden
+    ''' flag: a hidden package is withdrawn from the static file system, and a
+    ''' package which became visible again gets its mappings back.
+    ''' </summary>
+    ''' <param name="packageId">the package id.</param>
+    Private Sub refreshStaticFiles(packageId As String)
+        If router Is Nothing OrElse router.FileSystem Is Nothing Then
+            Return
+        End If
+
+        Dim key As String = If(packageId, "").Trim()
+
+        If key.StringEmpty() Then
+            Return
+        End If
+
+        If store.IsPackageHidden(key) Then
+            Call unregisterStaticFiles(key)
+            Return
+        End If
+
+        For Each pkg As PackageRecord In store.ReadAllPackages()
+            If pkg.package_id IsNot Nothing AndAlso pkg.package_id.Equals(key, StringComparison.OrdinalIgnoreCase) Then
+                Call registerStaticFiles(pkg)
+            End If
+        Next
     End Sub
 
     ''' <summary>
