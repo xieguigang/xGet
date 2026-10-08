@@ -51,6 +51,9 @@ Module Program
         "  package list               list the packages with their obsolete / hidden state" & vbCrLf &
         "  package obsolete <id> <on|off>  mark or unmark a package as obsolete" & vbCrLf &
         "  package hide <id> <on|off>      hide or unhide a package from every public view" & vbCrLf &
+        "  package owner list <id>         list the owners of one package id" & vbCrLf &
+        "  package owner add <id> <email>     associate an account with a package as its owner" & vbCrLf &
+        "  package owner remove <id> <email>  remove an account from the owners of a package" & vbCrLf &
         vbCrLf &
         "mail set options:" & vbCrLf &
         "  --host <host>    the smtp server host (required)" & vbCrLf &
@@ -401,9 +404,133 @@ Module Program
             Case "hide", "hidden", "unlist"
                 Return setPackageFlagAction(positional, "hidden")
 
+            Case "owner", "owners"
+                Return packageOwnerAction(positional)
+
             Case Else
                 Call Console.WriteLine($"unknown package action: '{action}'")
-                Call Console.WriteLine("available actions: list, obsolete, hide")
+                Call Console.WriteLine("available actions: list, obsolete, hide, owner")
+                Return 1
+        End Select
+    End Function
+
+    ''' <summary>
+    ''' the ``package owner`` action group: manually associate one account with
+    ''' one package id as its owner, or remove such an association again. the
+    ''' owners of a package (its uploaders, its manually assigned owners and the
+    ''' official administrator accounts) may publish new versions of it and
+    ''' change its public flags through the web api.
+    ''' </summary>
+    ''' <remarks>
+    ''' the ownership rows are written into the same database which the running
+    ''' server reads, so a change applies to the web api right away.
+    ''' </remarks>
+    Private Function packageOwnerAction(positional As List(Of String)) As Integer
+        Dim subAction As String = If(positional.Count > 0, positional(0).ToLowerInvariant(), "list")
+
+        Select Case subAction
+            Case "list", "ls"
+                If positional.Count < 2 Then
+                    Call Console.WriteLine("usage: xConsole package owner list <id>")
+                    Return 1
+                End If
+
+                Dim packageId As String = positional(1).Trim()
+
+                If Not store.PackageIdExists(packageId) Then
+                    Call Console.WriteLine($"package not found: '{packageId}'")
+                    Return 1
+                End If
+
+                Dim storedId As String = store.ResolvePackageId(packageId)
+                Dim owners As List(Of String) = store.GetPackageOwners(storedId)
+                Dim uploaders As List(Of String) = store.GetPackageUploaders(storedId)
+
+                Call Console.WriteLine($"owners of '{storedId}':")
+                Call Console.WriteLine()
+
+                For Each mail As String In owners
+                    Call Console.WriteLine($"  [owner]    {mail}")
+                Next
+
+                For Each mail As String In uploaders
+                    If Not owners.Any(Function(e) e.Equals(mail, StringComparison.OrdinalIgnoreCase)) Then
+                        Call Console.WriteLine($"  [uploader] {mail}")
+                    End If
+                Next
+
+                If owners.Count = 0 AndAlso uploaders.Count = 0 Then
+                    Call Console.WriteLine("  (no owner was recorded for this package)")
+                End If
+
+                Call Console.WriteLine()
+                Call Console.WriteLine("every account above may publish new versions of this package")
+                Call Console.WriteLine("and change its public flags through the web api.")
+                Return 0
+
+            Case "add", "grant"
+                If positional.Count < 3 Then
+                    Call Console.WriteLine("usage: xConsole package owner add <id> <email>")
+                    Return 1
+                End If
+
+                Dim packageId As String = positional(1).Trim()
+                Dim email As String = positional(2).Trim()
+
+                If Not store.PackageIdExists(packageId) Then
+                    Call Console.WriteLine($"package not found: '{packageId}'")
+                    Return 1
+                End If
+
+                If Not confirm($"associate the account '{email}' with the package '{packageId}' as its owner?") Then
+                    Call Console.WriteLine("cancelled.")
+                    Return 0
+                End If
+
+                If store.AddPackageOwner(packageId, email) Then
+                    Call Console.WriteLine($"the account '{email}' was associated with the package '{packageId}' as its owner.")
+
+                    If store.GetUser(email) Is Nothing Then
+                        Call Console.WriteLine("note: this email has no registered account yet, the ownership applies after the registration.")
+                    End If
+
+                    Return 0
+                Else
+                    Call Console.WriteLine($"the account '{email}' is already an owner of the package '{packageId}'.")
+                    Return 1
+                End If
+
+            Case "remove", "revoke", "rm", "del"
+                If positional.Count < 3 Then
+                    Call Console.WriteLine("usage: xConsole package owner remove <id> <email>")
+                    Return 1
+                End If
+
+                Dim packageId As String = positional(1).Trim()
+                Dim email As String = positional(2).Trim()
+
+                If Not store.PackageIdExists(packageId) Then
+                    Call Console.WriteLine($"package not found: '{packageId}'")
+                    Return 1
+                End If
+
+                If Not confirm($"remove the ownership of the account '{email}' on the package '{packageId}'?") Then
+                    Call Console.WriteLine("cancelled.")
+                    Return 0
+                End If
+
+                If store.RemovePackageOwner(packageId, email) Then
+                    Call Console.WriteLine($"the account '{email}' is no longer an owner of the package '{packageId}'.")
+                    Return 0
+                Else
+                    Call Console.WriteLine($"the account '{email}' is not a manually assigned owner of the package '{packageId}'.")
+                    Call Console.WriteLine("(note: the uploader accounts of the package versions can not be removed manually.)")
+                    Return 1
+                End If
+
+            Case Else
+                Call Console.WriteLine($"unknown package owner action: '{subAction}'")
+                Call Console.WriteLine("available actions: list, add, remove")
                 Return 1
         End Select
     End Function

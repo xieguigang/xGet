@@ -280,7 +280,7 @@ Public Class NugetStore
         "package_metadata", "package_activity", "package_doc_activity",
         "package_clusters", "package_api_docs", "user_flags", "package_uploaders",
         "pending_registrations", "pending_resets", "email_blacklist", "server_settings",
-        "package_flags"
+        "package_flags", "package_owners"
     }
 
     Private Sub initialize()
@@ -404,6 +404,13 @@ Public Class NugetStore
                 "  email VARCHAR(320) NOT NULL," &
                 "  published DATETIME" &
                 ") COMMENT='the uploader account of a package version'")
+            Call engine.Execute(
+                "CREATE TABLE IF NOT EXISTS package_owners (" &
+                "  id INT NOT NULL PRIMARY KEY," &
+                "  package_id VARCHAR(200) NOT NULL," &
+                "  email VARCHAR(320) NOT NULL," &
+                "  created DATETIME" &
+                ") COMMENT='manually assigned package owners (xConsole package owner)'")
             Call engine.Execute(
                 "CREATE TABLE IF NOT EXISTS pending_registrations (" &
                 "  id INT NOT NULL PRIMARY KEY," &
@@ -2396,6 +2403,157 @@ Public Class NugetStore
         End SyncLock
 
         Return best
+    End Function
+
+    ''' <summary>
+    ''' read the distinct uploader accounts of every recorded version of one
+    ''' package id.
+    ''' </summary>
+    ''' <remarks>
+    ''' the package id is compared in memory because the JSql string comparison
+    ''' is case sensitive and the uploader row may carry another spelling of the
+    ''' package id than the ``packages`` row.
+    ''' </remarks>
+    Public Function GetPackageUploaders(packageId As String) As List(Of String)
+        Dim key As String = If(packageId, "").Trim()
+        Dim list As New List(Of String)
+
+        If key.StringEmpty() Then
+            Return list
+        End If
+
+        SyncLock sync
+            Dim rs As ResultSet = query("SELECT package_id, email FROM package_uploaders")
+
+            If rs IsNot Nothing AndAlso rs.IsQuery Then
+                For Each row As Object() In rs.Rows
+                    If Not String.Equals(toStr(row(0)).Trim(), key, StringComparison.OrdinalIgnoreCase) Then
+                        Continue For
+                    End If
+
+                    Dim mail As String = toStr(row(1)).Trim()
+
+                    If mail.StringEmpty() Then
+                        Continue For
+                    End If
+
+                    ' keep one entry per account (case insensitive)
+                    If Not list.Any(Function(e) e.Equals(mail, StringComparison.OrdinalIgnoreCase)) Then
+                        Call list.Add(mail)
+                    End If
+                Next
+            End If
+        End SyncLock
+
+        Return list
+    End Function
+
+#End Region
+
+#Region "package owners (manually assigned)"
+
+    ''' <summary>
+    ''' read the manually assigned owners of one package id: the accounts which
+    ''' the server administrator has associated with the package through the
+    ''' ``xConsole package owner add`` command.
+    ''' </summary>
+    ''' <remarks>
+    ''' the package id is compared in memory because the JSql string comparison
+    ''' is case sensitive. the emails are stored and returned in their lower
+    ''' case form.
+    ''' </remarks>
+    Public Function GetPackageOwners(packageId As String) As List(Of String)
+        Dim key As String = If(packageId, "").Trim()
+        Dim list As New List(Of String)
+
+        If key.StringEmpty() Then
+            Return list
+        End If
+
+        SyncLock sync
+            Dim rs As ResultSet = query("SELECT package_id, email FROM package_owners")
+
+            If rs IsNot Nothing AndAlso rs.IsQuery Then
+                For Each row As Object() In rs.Rows
+                    If Not String.Equals(toStr(row(0)).Trim(), key, StringComparison.OrdinalIgnoreCase) Then
+                        Continue For
+                    End If
+
+                    Dim mail As String = toStr(row(1)).Trim().ToLowerInvariant()
+
+                    If Not mail.StringEmpty() AndAlso
+                       Not list.Any(Function(e) e.Equals(mail, StringComparison.OrdinalIgnoreCase)) Then
+                        Call list.Add(mail)
+                    End If
+                Next
+            End If
+        End SyncLock
+
+        Return list
+    End Function
+
+    ''' <summary>
+    ''' associate one account with one package id as its manually assigned
+    ''' owner. the operation is idempotent: assigning an existing owner again
+    ''' returns <c>False</c> and writes nothing.
+    ''' </summary>
+    ''' <returns><c>True</c> when a new owner row was created.</returns>
+    Public Function AddPackageOwner(packageId As String, email As String) As Boolean
+        If String.IsNullOrEmpty(packageId) OrElse String.IsNullOrEmpty(email) Then
+            Return False
+        End If
+
+        Dim id As String = packageId.Trim()
+        Dim mail As String = email.Trim().ToLowerInvariant()
+
+        If id.StringEmpty() OrElse mail.StringEmpty() Then
+            Return False
+        End If
+
+        SyncLock sync
+            If GetPackageOwners(id).Any(Function(e) e.Equals(mail, StringComparison.OrdinalIgnoreCase)) Then
+                Return False
+            End If
+
+            Dim rowId As Long = nextId("package_owners")
+
+            Call exec(
+                "INSERT INTO package_owners (id, package_id, email, created) VALUES (" &
+                $"{rowId}, '{esc(id)}', '{esc(mail)}', {dateLiteral(Date.UtcNow)})")
+        End SyncLock
+
+        Return True
+    End Function
+
+    ''' <summary>
+    ''' remove one manually assigned owner from one package id.
+    ''' </summary>
+    ''' <returns><c>True</c> when an owner row was removed.</returns>
+    Public Function RemovePackageOwner(packageId As String, email As String) As Boolean
+        If String.IsNullOrEmpty(packageId) OrElse String.IsNullOrEmpty(email) Then
+            Return False
+        End If
+
+        Dim id As String = packageId.Trim()
+        Dim mail As String = email.Trim().ToLowerInvariant()
+
+        If id.StringEmpty() OrElse mail.StringEmpty() Then
+            Return False
+        End If
+
+        SyncLock sync
+            Dim match As String = GetPackageOwners(id) _
+                .Where(Function(e) e.Equals(mail, StringComparison.OrdinalIgnoreCase)) _
+                .FirstOrDefault()
+
+            If match Is Nothing Then
+                Return False
+            End If
+
+            Call exec($"DELETE FROM package_owners WHERE package_id = '{esc(id)}' AND email = '{esc(match)}'")
+        End SyncLock
+
+        Return True
     End Function
 
 #End Region

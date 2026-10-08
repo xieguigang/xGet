@@ -30,6 +30,13 @@ Public Class Service
     Private router As HttpRouter
 
     ''' <summary>
+    ''' the sliding window rate limiter of the unauthenticated ``/api/register``
+    ''' and ``/api/reset`` endpoints. it is created during ``Mount`` with the
+    ''' configured window width and limits.
+    ''' </summary>
+    Private rateLimiter As RateLimiter
+
+    ''' <summary>
     ''' the timer driving the periodic package cluster analysis. the instance is
     ''' kept in a field because an unreferenced timer would be garbage
     ''' collected and the periodic task would silently stop.
@@ -69,6 +76,7 @@ Public Class Service
 
         Me.store = New NugetStore(Me.config.DatabaseDirectory, Me.config.CreateStorageOptions())
         Me.auth = New TotpAuth(Me.store)
+        Me.rateLimiter = New RateLimiter(Me.config.RateWindowSeconds)
 
         ' the host attaches the physical package folder to the ``/packages/`` urls
         ' before this module is mounted, so the packages which are already hidden
@@ -494,6 +502,20 @@ Public Class Service
             Return
         End If
 
+        ' ---- rate limit: one mailbox and one client ip can start only a few
+        ' registration requests inside the configured sliding window. the check
+        ' runs before every further test and its response does not reveal
+        ' whether the email address is registered on this server.
+        If Not rateLimiter.TryAcquire(
+            New RateLimiter.RateLimit(RateLimiter.EmailKey(email), config.RegisterEmailLimit),
+            New RateLimiter.RateLimit(RateLimiter.IpKey(req.Remote), config.RegisterIpLimit)) Then
+
+            Call $"registration rejected: rate limit exceeded for '{email}'".warning()
+            res.WriteError(HTTP_RFC.RFC_TOO_MANY_REQUEST,
+                           "too many registration requests from this address: please wait a few minutes and try again.")
+            Return
+        End If
+
         ' ---- email account domain blacklist ----
         If store.IsEmailBlacklisted(email) Then
             Call $"registration rejected: the domain of '{email}' is blacklisted".warning()
@@ -640,6 +662,20 @@ Public Class Service
 
         If String.IsNullOrEmpty(email) Then
             res.WriteError(HTTP_RFC.RFC_BAD_REQUEST, "the email argument is required")
+            Return
+        End If
+
+        ' ---- rate limit: the reset endpoint is unauthenticated, so one
+        ' mailbox and one client ip can start only a few reset requests inside
+        ' the configured sliding window (the mailbox flood protection of the
+        ' pending reset below can only help after the limit was passed).
+        If Not rateLimiter.TryAcquire(
+            New RateLimiter.RateLimit(RateLimiter.EmailKey(email), config.ResetEmailLimit),
+            New RateLimiter.RateLimit(RateLimiter.IpKey(req.Remote), config.ResetIpLimit)) Then
+
+            Call $"secret reset rejected: rate limit exceeded for '{email}'".warning()
+            res.WriteError(HTTP_RFC.RFC_TOO_MANY_REQUEST,
+                           "too many reset requests from this address: please wait a few minutes and try again.")
             Return
         End If
 
@@ -854,6 +890,21 @@ Public Class Service
                 Return
             End If
 
+            ' ---- package ownership: only the owners of an already published
+            ' package id may push further versions of it, so that no account can
+            ' hijack the namespace of a package of another publisher. a brand
+            ' new package id can be registered by any verified account. the id
+            ' is resolved to its stored spelling first, so the owner lookup
+            ' can not be bypassed through the case sensitivity of the id.
+            Dim storedId As String = store.ResolvePackageId(metadata.Id)
+
+            If Not storedId.StringEmpty() AndAlso Not isPackageOwner(storedId, email) Then
+                Call $"upload rejected: '{email}' is not an owner of '{storedId}'".warning()
+                res.WriteError(HTTP_RFC.RFC_FORBIDDEN,
+                    $"the account '{email}' is not an owner of the package '{storedId}', so it can not publish new versions of it")
+                Return
+            End If
+
             Dim pkg As New PackageRecord With {
                 .package_id = metadata.Id,
                 .version = metadata.Version,
@@ -995,21 +1046,47 @@ Public Class Service
     End Sub
 
     ''' <summary>
+    ''' may the given account publish new versions of the given package id? the
+    ''' owners of a package are: the accounts which uploaded one of its
+    ''' versions, the accounts which the server administrator has manually
+    ''' assigned through the ``xConsole package owner`` command, and an account
+    ''' which carries the ``official`` badge acts as a server administrator.
+    ''' </summary>
+    ''' <param name="packageId">the package id.</param>
+    ''' <param name="email">the authenticated account.</param>
+    Private Function isPackageOwner(packageId As String, email As String) As Boolean
+        If String.IsNullOrEmpty(packageId) OrElse String.IsNullOrEmpty(email) Then
+            Return False
+        End If
+
+        ' the official badge is the server administrator role
+        If store.IsUserOfficial(email) Then
+            Return True
+        End If
+
+        Dim mail As String = email.Trim()
+
+        ' the accounts which uploaded any recorded version of the package
+        If store.GetPackageUploaders(packageId).Any(Function(e) e.Trim().Equals(mail, StringComparison.OrdinalIgnoreCase)) Then
+            Return True
+        End If
+
+        ' the accounts which the administrator assigned through xConsole
+        If store.GetPackageOwners(packageId).Any(Function(e) e.Trim().Equals(mail, StringComparison.OrdinalIgnoreCase)) Then
+            Return True
+        End If
+
+        Return False
+    End Function
+
+    ''' <summary>
     ''' may the given account change the public flags of the given package? the
-    ''' uploader account of the package owns it, and an account which carries the
-    ''' ``official`` badge acts as a server administrator.
+    ''' owners of the package (see <see cref="isPackageOwner"/>) may do it.
     ''' </summary>
     ''' <param name="packageId">the package id.</param>
     ''' <param name="email">the authenticated account.</param>
     Private Function canManagePackage(packageId As String, email As String) As Boolean
-        Dim owner As String = store.GetPackageUploader(packageId)
-
-        If Not owner.StringEmpty() AndAlso
-           owner.Trim().Equals(If(email, "").Trim(), StringComparison.OrdinalIgnoreCase) Then
-            Return True
-        End If
-
-        Return store.IsUserOfficial(email)
+        Return isPackageOwner(packageId, email)
     End Function
 
     ''' <summary>
@@ -1851,14 +1928,22 @@ Public Class Service
     End Sub
 
     ''' <summary>
-    ''' force a cluster analysis rebuild; the uploaded TOTP credentials of a
-    ''' registered user are required. an optional ``k`` argument overrides the
-    ''' configured number of clusters.
+    ''' force a cluster analysis rebuild; the uploaded TOTP credentials of an
+    ''' ``official`` server administrator account are required. an optional
+    ''' ``k`` argument overrides the configured number of clusters.
     ''' </summary>
     <HttpPost("/api/stats/clusters/rebuild")>
     Public Sub ApiStatsClustersRebuild(req As HttpPOSTRequest, res As HttpResponse)
-        If Not auth.Authenticate(argument(req, "email"), argument(req, "code")) Then
+        Dim email As String = argument(req, "email")
+
+        If Not auth.Authenticate(email, argument(req, "code")) Then
             res.WriteError(HTTP_RFC.RFC_UNAUTHORIZED, "invalid email or TOTP code")
+            Return
+        End If
+
+        If Not store.IsUserOfficial(email) Then
+            Call $"cluster rebuild rejected: '{email}' is not an official account".warning()
+            res.WriteError(HTTP_RFC.RFC_FORBIDDEN, "only an official server administrator account can rebuild the cluster analysis")
             Return
         End If
 
@@ -1891,8 +1976,16 @@ Public Class Service
 
     <HttpPost("/api/stats/rebuild")>
     Public Sub ApiStatsRebuild(req As HttpPOSTRequest, res As HttpResponse)
-        If Not auth.Authenticate(argument(req, "email"), argument(req, "code")) Then
+        Dim email As String = argument(req, "email")
+
+        If Not auth.Authenticate(email, argument(req, "code")) Then
             res.WriteError(HTTP_RFC.RFC_UNAUTHORIZED, "invalid email or TOTP code")
+            Return
+        End If
+
+        If Not store.IsUserOfficial(email) Then
+            Call $"stats rebuild rejected: '{email}' is not an official account".warning()
+            res.WriteError(HTTP_RFC.RFC_FORBIDDEN, "only an official server administrator account can rebuild the statistics")
             Return
         End If
 

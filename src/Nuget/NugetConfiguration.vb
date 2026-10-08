@@ -185,6 +185,40 @@ Public Class NugetConfiguration
     ''' </summary>
     Public ReadOnly Property VerifyTtlMinutes As Integer
 
+    ''' <summary>
+    ''' the maximum number of ``/api/register`` requests which one email address
+    ''' may start inside the rate limit window. configuration key
+    ''' ``register-email-limit``, default 3.
+    ''' </summary>
+    Public ReadOnly Property RegisterEmailLimit As Integer
+
+    ''' <summary>
+    ''' the maximum number of ``/api/register`` requests which one client ip
+    ''' address may start inside the rate limit window. configuration key
+    ''' ``register-ip-limit``, default 20.
+    ''' </summary>
+    Public ReadOnly Property RegisterIpLimit As Integer
+
+    ''' <summary>
+    ''' the maximum number of ``/api/reset`` requests which one email address
+    ''' may start inside the rate limit window. configuration key
+    ''' ``reset-email-limit``, default 3.
+    ''' </summary>
+    Public ReadOnly Property ResetEmailLimit As Integer
+
+    ''' <summary>
+    ''' the maximum number of ``/api/reset`` requests which one client ip
+    ''' address may start inside the rate limit window. configuration key
+    ''' ``reset-ip-limit``, default 20.
+    ''' </summary>
+    Public ReadOnly Property ResetIpLimit As Integer
+
+    ''' <summary>
+    ''' the width of the sliding window of the register/reset rate limiter in
+    ''' seconds. configuration key ``rate-window-seconds``, default 600.
+    ''' </summary>
+    Public ReadOnly Property RateWindowSeconds As Integer
+
     Public Const DefaultClusterK As Integer = 6
     Public Const DefaultClusterIntervalMinutes As Integer = 30
     Public Const DefaultClusterMinSamples As Integer = 3
@@ -204,6 +238,12 @@ Public Class NugetConfiguration
     Public Const DefaultApiDocWorkerTimeoutSeconds As Integer = 120
     Public Const DefaultVerifyTtlMinutes As Integer = 30
 
+    Public Const DefaultRegisterEmailLimit As Integer = 3
+    Public Const DefaultRegisterIpLimit As Integer = 20
+    Public Const DefaultResetEmailLimit As Integer = 3
+    Public Const DefaultResetIpLimit As Integer = 20
+    Public Const DefaultRateWindowSeconds As Integer = 600
+
     Private Sub New(data As String, packages As String, database As String, wwwroot As String, template As String, baseUrl As String,
                     tmp As String, sitemapEnabled As Boolean, sitemapBaseUrl As String,
                     sitemapIdleSeconds As Integer, sitemapIntervalSeconds As Integer,
@@ -212,7 +252,9 @@ Public Class NugetConfiguration
                     dbMergeIdleSeconds As Integer, dbMergeOperations As Integer, dbCheckpointSeconds As Integer,
                     registrationEnabled As Boolean, maxUploadMB As Double,
                     zipMaxEntryMB As Double, zipMaxTotalMB As Double, zipMaxEntries As Integer,
-                    apiDocWorkerTimeoutSeconds As Integer, verifyTtlMinutes As Integer)
+                    apiDocWorkerTimeoutSeconds As Integer, verifyTtlMinutes As Integer,
+                    registerEmailLimit As Integer, registerIpLimit As Integer,
+                    resetEmailLimit As Integer, resetIpLimit As Integer, rateWindowSeconds As Integer)
 
         Me.DataDirectory = data
         Me.PackageDirectory = packages
@@ -240,6 +282,11 @@ Public Class NugetConfiguration
         Me.ZipMaxEntries = zipMaxEntries
         Me.ApiDocWorkerTimeoutSeconds = apiDocWorkerTimeoutSeconds
         Me.VerifyTtlMinutes = verifyTtlMinutes
+        Me.RegisterEmailLimit = registerEmailLimit
+        Me.RegisterIpLimit = registerIpLimit
+        Me.ResetEmailLimit = resetEmailLimit
+        Me.ResetIpLimit = resetIpLimit
+        Me.RateWindowSeconds = rateWindowSeconds
     End Sub
 
     ''' <summary>
@@ -283,7 +330,11 @@ Public Class NugetConfiguration
     ''' ``base-url``, ``tmp``, ``sitemap-enabled``, ``sitemap-base-url``,
     ''' ``sitemap-idle-seconds``, ``sitemap-interval-seconds``,
     ''' ``cluster-enabled``, ``cluster-k``, ``cluster-interval``,
-    ''' ``cluster-min-samples`` and ``cluster-neighbors``.
+    ''' ``cluster-min-samples``, ``cluster-neighbors``, ``registration-enabled``,
+    ''' ``max-upload-mb``, ``zip-max-entry-mb``, ``zip-max-total-mb``,
+    ''' ``zip-max-entries``, ``apidoc-timeout-seconds``, ``verify-ttl-minutes``,
+    ''' ``register-email-limit``, ``register-ip-limit``, ``reset-email-limit``,
+    ''' ``reset-ip-limit`` and ``rate-window-seconds``.
     ''' </summary>
     ''' <param name="config">the host configuration dictionary (may be <c>Nothing</c>).</param>
     ''' <returns>the resolved configuration instance.</returns>
@@ -345,7 +396,12 @@ Public Class NugetConfiguration
             doubleValue(config, "zip-max-total-mb", DefaultZipMaxTotalMB, 1, 16384),
             intValue(config, "zip-max-entries", DefaultZipMaxEntries, 8, 65536),
             intValue(config, "apidoc-timeout-seconds", DefaultApiDocWorkerTimeoutSeconds, 10, 3600),
-            intValue(config, "verify-ttl-minutes", DefaultVerifyTtlMinutes, 5, 1440))
+            intValue(config, "verify-ttl-minutes", DefaultVerifyTtlMinutes, 5, 1440),
+            intValue(config, "register-email-limit", DefaultRegisterEmailLimit, 1, 1000),
+            intValue(config, "register-ip-limit", DefaultRegisterIpLimit, 1, 10000),
+            intValue(config, "reset-email-limit", DefaultResetEmailLimit, 1, 1000),
+            intValue(config, "reset-ip-limit", DefaultResetIpLimit, 1, 10000),
+            intValue(config, "rate-window-seconds", DefaultRateWindowSeconds, 30, 86400))
     End Function
 
     ''' <summary>
