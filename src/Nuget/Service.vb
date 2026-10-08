@@ -1725,6 +1725,14 @@ Public Class Service
 
         email = email.Trim().ToLowerInvariant()
         Dim flags As UserFlagRecord = store.GetUserFlags(email)
+
+        ' an email which never registered an account and which uploaded no
+        ' package of this feed has no profile page
+        If Not accountExists(email) Then
+            res.WriteError(HTTP_RFC.RFC_NOT_FOUND, $"the account '{email}' was not found")
+            Return
+        End If
+
         Dim packages As List(Of PackageSummary) = store.GetUserPackages(email)
         Dim projects As List(Of ProjectInfo) = store.GetUserProjects(email)
 
@@ -1748,6 +1756,23 @@ Public Class Service
     End Sub
 
     ''' <summary>
+    ''' test whether the given email has a profile on this server: a registered
+    ''' account, or at least one package which it uploaded.
+    ''' </summary>
+    ''' <param name="email">the email address (compared case insensitively).</param>
+    Private Function accountExists(email As String) As Boolean
+        If String.IsNullOrEmpty(email) Then
+            Return False
+        End If
+
+        If store.GetUser(email) IsNot Nothing Then
+            Return True
+        End If
+
+        Return store.GetUserPackages(email).Count > 0
+    End Function
+
+    ''' <summary>
     ''' the daily download / page view / doc view series aggregated over every
     ''' package that the given account has uploaded.
     ''' </summary>
@@ -1761,6 +1786,12 @@ Public Class Service
         End If
 
         Dim days As Integer = clampDays(req)
+
+        If Not accountExists(email) Then
+            res.WriteError(HTTP_RFC.RFC_NOT_FOUND, $"the account '{email}' was not found")
+            Return
+        End If
+
         Dim activity As List(Of DailyActivity) = store.GetUserActivityAggregate(email.Trim().ToLowerInvariant(), days)
 
         res.AccessControlAllowOrigin = "*"
@@ -1979,7 +2010,7 @@ Public Class Service
 
         ' the api documentation of a hidden package may not be read either
         If store.IsPackageHidden(id) Then
-            res.WriteError(HTTP_RFC.RFC_NOT_FOUND, $"the api document was not found: {id} {version} {name}")
+            Call redirectNotFound(res, "docs", id)
             Return
         End If
 
@@ -1990,7 +2021,7 @@ Public Class Service
         End If
 
         If String.IsNullOrEmpty(html) Then
-            res.WriteError(HTTP_RFC.RFC_NOT_FOUND, $"the api document was not found: {id} {version} {name}")
+            Call redirectNotFound(res, "docs", id)
             Return
         End If
 
@@ -2011,10 +2042,30 @@ Public Class Service
         Dim html As String = render()
 
         If String.IsNullOrEmpty(html) Then
-            res.WriteError(HTTP_RFC.RFC_NOT_FOUND, "the requested api document page was not found")
+            Call redirectNotFound(res, "docs")
         Else
             Call writeHtml(res, html)
         End If
+    End Sub
+
+    ''' <summary>
+    ''' hand the browser over to the static 404 page of the web front end. the
+    ''' server side rendered html routes use it instead of a plain text error
+    ''' body, so that a visitor who follows an outdated or withdrawn link sees
+    ''' the styled page. the json api endpoints keep their plain error response,
+    ''' which is what an api client expects.
+    ''' </summary>
+    ''' <param name="res">the response to write the redirect to.</param>
+    ''' <param name="kind">the kind of the missing resource (``package``, ``user`` or ``docs``).</param>
+    ''' <param name="id">the requested id, carried over for the page context.</param>
+    Private Sub redirectNotFound(res As HttpResponse, kind As String, Optional id As String = Nothing)
+        Dim url As String = $"/404.html?type={Uri.EscapeDataString(If(kind, ""))}"
+
+        If Not String.IsNullOrEmpty(id) Then
+            url &= $"&id={Uri.EscapeDataString(id)}"
+        End If
+
+        res.Redirect(url)
     End Sub
 
     ''' <summary>

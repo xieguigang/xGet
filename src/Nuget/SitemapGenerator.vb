@@ -356,8 +356,8 @@ Public Module SitemapGenerator
 
     ''' <summary>
     ''' the ``*.html`` files of the ``wwwroot`` folder; ``index.html`` becomes the
-    ''' site root and ``package.html`` is excluded because it is listed once per
-    ''' package.
+    ''' site root, while ``package.html`` and ``404.html`` are excluded because
+    ''' they are parameterized and are not entries of their own.
     ''' </summary>
     Private Function staticPages(config As NugetConfiguration, baseUrl As String, now As Date) As List(Of SitemapEntry)
         Dim entries As New List(Of SitemapEntry)
@@ -367,7 +367,7 @@ Public Module SitemapGenerator
         End If
 
         Dim pages = Directory.EnumerateFiles(config.Wwwroot, "*.html", SearchOption.TopDirectoryOnly) _
-            .Where(Function(file) Not Path.GetFileName(file).Equals("package.html", StringComparison.OrdinalIgnoreCase)) _
+            .Where(Function(file) Not isUnlistedPage(Path.GetFileName(file))) _
             .OrderBy(Function(file) If(Path.GetFileName(file).Equals("index.html", StringComparison.OrdinalIgnoreCase), 0, 1)) _
             .ThenBy(Function(file) Path.GetFileName(file), StringComparer.OrdinalIgnoreCase) _
             .ToList()
@@ -393,6 +393,17 @@ Public Module SitemapGenerator
         Next
 
         Return entries
+    End Function
+
+    ''' <summary>
+    ''' test whether one html file of the ``wwwroot`` folder is kept out of the
+    ''' site map: ``package.html`` is listed once per package instead of once for
+    ''' its own url, and the error page must never be indexed.
+    ''' </summary>
+    ''' <param name="fileName">the file name of the page.</param>
+    Private Function isUnlistedPage(fileName As String) As Boolean
+        Return fileName.Equals("package.html", StringComparison.OrdinalIgnoreCase) OrElse
+               fileName.Equals("404.html", StringComparison.OrdinalIgnoreCase)
     End Function
 
     ''' <summary>

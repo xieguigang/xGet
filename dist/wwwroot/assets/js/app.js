@@ -975,6 +975,17 @@
             applyStats(result.stats);
         }).catch(function () { });
 
+        /* the 404 page hands the visitor over with the searched text, and a
+           shared link may carry it as well, so the query string pre-fills the
+           search box before the first page load. */
+        var preset = queryParam('q');
+        var searchBox = $('search-input');
+
+        if (preset && searchBox) {
+            searchBox.value = preset;
+            state.q = preset;
+        }
+
         loadPackages();
 
         var search = $('search-input');
@@ -1269,6 +1280,71 @@
         });
     }
 
+    /* ----------------------------- 404 page ----------------------------- */
+
+    /* the shared "not found" page. the server and the single resource pages
+       hand it over with a ``type`` and the requested ``id`` so that the
+       visitor is told which resource is missing instead of a bare 404. */
+    function initNotFound() {
+        var type = queryParam('type').toLowerCase();
+        var id = queryParam('id');
+        var title;
+        var detail;
+
+        if (type === 'package') {
+            title = 'This package is not available.';
+            detail = 'No package with the id {id} is published on this server. It was either never ' +
+                'uploaded here, or its owner has withdrawn it from the feed — its detail page, its ' +
+                'nuget api records, its downloads and its api documentation are all unavailable.';
+        } else if (type === 'user') {
+            title = 'This account is not available.';
+            detail = 'No account with the address {id} is registered on this server. Check the spelling ' +
+                'of the email address, or browse the packages to find the uploader of a package.';
+        } else if (type === 'docs') {
+            title = 'This api documentation page is not available.';
+            detail = 'The requested api documentation page {id} does not exist. The package version may ' +
+                'ship no documentation, or the package is not public anymore.';
+        } else {
+            title = 'The page or resource you asked for does not exist on this server.';
+            detail = '';
+        }
+
+        document.title = 'Not found · nuget';
+
+        setText('nf-headline', title);
+
+        var target = $('nf-crumb');
+        if (target) {
+            target.textContent = id || window.location.host;
+        }
+
+        var detailNode = $('nf-detail');
+        if (detailNode && detail) {
+            var parts = detail.split('{id}');
+
+            detailNode.innerHTML = esc(parts[0]) +
+                (id ? '<span class="mono">' + esc(id) + '</span>' : 'this resource') +
+                esc(parts.slice(1).join('{id}'));
+        }
+
+        /* the search box continues on the package list, which honours ?q= */
+        var form = $('nf-search');
+        var query = $('nf-query');
+
+        if (form && query) {
+            if (type === 'package' && id) {
+                query.value = id;
+            }
+
+            form.addEventListener('submit', function (event) {
+                event.preventDefault();
+                var text = query.value.trim();
+
+                window.location.href = 'index.html' + (text ? '?q=' + encodeURIComponent(text) : '');
+            });
+        }
+    }
+
     document.addEventListener('DOMContentLoaded', function () {
         var page = document.body.getAttribute('data-page');
 
@@ -1284,6 +1360,8 @@
             initUserPage();
         } else if (page === 'dependents') {
             initDependentsPage();
+        } else if (page === '404') {
+            initNotFound();
         }
     });
 })();
