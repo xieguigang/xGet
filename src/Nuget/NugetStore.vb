@@ -1001,26 +1001,47 @@ Public Class NugetStore
     End Function
 
     Public Function ListPackages(keyword As String) As List(Of PackageSummary)
-        Return GroupPackages(keyword) _
-            .OrderByDescending(Function(g) g.total_downloads) _
-            .ThenBy(Function(g) g.package_id, StringComparer.OrdinalIgnoreCase) _
-            .Select(Function(g) New PackageSummary With {
-                .package_id = g.package_id,
-                .latest_version = g.latest.version,
-                .description = g.latest.description,
-                .authors = g.latest.authors,
-                .tags = g.latest.tags,
-                .license = g.latest.license,
-                .project_url = g.latest.project_url,
-                .total_downloads = g.total_downloads,
-                .versions = g.versions.Count,
-                .published = g.latest.published
-            }) _
-            .ToList()
+        SyncLock sync
+            Dim list As List(Of PackageSummary) = GroupPackages(keyword) _
+                .OrderByDescending(Function(g) g.total_downloads) _
+                .ThenBy(Function(g) g.package_id, StringComparer.OrdinalIgnoreCase) _
+                .Select(Function(g) New PackageSummary With {
+                    .package_id = g.package_id,
+                    .latest_version = g.latest.version,
+                    .description = g.latest.description,
+                    .authors = g.latest.authors,
+                    .tags = g.latest.tags,
+                    .license = g.latest.license,
+                    .project_url = g.latest.project_url,
+                    .total_downloads = g.total_downloads,
+                    .versions = g.versions.Count,
+                    .published = g.latest.published
+                }) _
+                .ToList()
+
+            ' the package level flags are attached here so that the web front
+            ' end can render the obsolete badge of a package list entry
+            Dim flags As Dictionary(Of String, PackageFlagRecord) = packageFlagsNoLock()
+
+            For Each item As PackageSummary In list
+                Dim record As PackageFlagRecord = Nothing
+
+                If item.package_id IsNot Nothing AndAlso
+                   flags.TryGetValue(item.package_id.Trim().ToLowerInvariant(), record) Then
+                    item.obsolete = record.obsolete
+                End If
+            Next
+
+            Return list
+        End SyncLock
     End Function
 
+    ''' <summary>
+    ''' the feed statistics. the hidden packages are not part of them, so the
+    ''' totals of the front end never leak a withdrawn package.
+    ''' </summary>
     Public Function Stats() As NugetStats
-        Dim all As List(Of PackageRecord) = ReadAllPackages()
+        Dim all As List(Of PackageRecord) = ReadVisiblePackages()
 
         Return New NugetStats With {
             .packages = all.Select(Function(p) p.package_id.ToLowerInvariant()).Distinct().Count(),
@@ -1888,7 +1909,7 @@ Public Class NugetStore
     End Function
 
     Private Function latestVersionOf(packageId As String) As String
-        Dim versions As List(Of PackageRecord) = ReadAllPackages() _
+        Dim versions As List(Of PackageRecord) = ReadVisiblePackages() _
             .Where(Function(p) p.package_id.Equals(packageId, StringComparison.OrdinalIgnoreCase)) _
             .OrderBy(Function(p) VersionKey(p.version)) _
             .ToList()
