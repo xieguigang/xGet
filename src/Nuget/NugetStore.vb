@@ -970,11 +970,12 @@ Public Class NugetStore
 
     ''' <summary>
     ''' group all listed packages by their (case insensitive) package id,
-    ''' optionally filtered by a keyword over the id and tags.
+    ''' optionally filtered by a keyword over the id and tags. the hidden
+    ''' packages are always excluded: they may not be searched.
     ''' </summary>
     Public Function GroupPackages(keyword As String, Optional includeUnlisted As Boolean = False) As List(Of PackageSearchResult)
         Dim text As String = If(keyword, "").Trim()
-        Dim all As List(Of PackageRecord) = ReadAllPackages()
+        Dim all As List(Of PackageRecord) = ReadVisiblePackages()
 
         Dim groups = all _
             .Where(Function(p) includeUnlisted OrElse p.listed) _
