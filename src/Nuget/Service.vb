@@ -898,6 +898,197 @@ Public Class Service
 
 #End Region
 
+#Region "package flags (obsolete / hidden)"
+
+    ''' <summary>
+    ''' mark (or unmark) a package id as obsolete. the operation requires the
+    ''' TOTP credentials of the account which uploaded the package: the
+    ''' ``obsolete`` marker means that the package is no longer recommended,
+    ''' while it is still served and documented. the server administrator can
+    ''' set the very same flag directly through the ``xConsole package obsolete``
+    ''' command.
+    ''' </summary>
+    <HttpPost("/api/package/obsolete")>
+    Public Sub ApiPackageObsolete(req As HttpPOSTRequest, res As HttpResponse)
+        Call setPackageFlag(req, res, "obsolete")
+    End Sub
+
+    ''' <summary>
+    ''' hide (or unhide) a package id from every public view of the server. only
+    ''' the uploader account of the package (or a server administrator) may do it
+    ''' through the api; the administrator manages the very same flag directly
+    ''' through the ``xConsole package hide`` command.
+    ''' </summary>
+    <HttpPost("/api/package/hide")>
+    Public Sub ApiPackageHide(req As HttpPOSTRequest, res As HttpResponse)
+        Call setPackageFlag(req, res, "hidden")
+    End Sub
+
+    ''' <summary>
+    ''' the shared implementation of the two package flag endpoints. the request
+    ''' carries the TOTP credentials, the package id and an optional ``value``
+    ''' argument (``true``/``false``, default <c>True</c>).
+    ''' </summary>
+    ''' <param name="req"></param>
+    ''' <param name="res"></param>
+    ''' <param name="flagName">either ``obsolete`` or ``hidden``.</param>
+    Private Sub setPackageFlag(req As HttpPOSTRequest, res As HttpResponse, flagName As String)
+        Dim email As String = argument(req, "email")
+        Dim code As String = argument(req, "code")
+
+        If Not auth.Authenticate(email, code) Then
+            Call $"package {flagName} rejected: email='{email}'".warning()
+            res.WriteError(HTTP_RFC.RFC_UNAUTHORIZED, "invalid email or TOTP code")
+            Return
+        End If
+
+        Dim id As String = argument(req, "id")
+
+        If id.StringEmpty() Then
+            res.WriteError(HTTP_RFC.RFC_BAD_REQUEST, "the package id argument is required")
+            Return
+        End If
+
+        id = id.Trim()
+
+        If Not store.PackageIdExists(id) Then
+            res.WriteError(HTTP_RFC.RFC_NOT_FOUND, $"package '{id}' was not found")
+            Return
+        End If
+
+        If Not canManagePackage(id, email) Then
+            Call $"package {flagName} rejected: '{email}' is not an owner of '{id}'".warning()
+            res.WriteError(HTTP_RFC.RFC_FORBIDDEN,
+                $"the account '{email}' is not an owner of the package '{id}', so it can not change its {flagName} state")
+            Return
+        End If
+
+        Dim flag As Boolean = parseFlagArgument(argument(req, "value"))
+        Call store.SetPackageFlag(id, flagName, flag)
+
+        If flagName = "hidden" Then
+            ' the cached views of the feed have to follow the new state
+            Call refreshHiddenPackageViews(id)
+        End If
+
+        Dim flags As PackageFlagRecord = store.GetPackageFlags(id)
+
+        Call $"package '{id}' {flagName} flag set to {flag} by '{email}'".info()
+
+        writeResult(res, True, packageFlagMessage(id, flagName, flag), New Dictionary(Of String, Object) From {
+            {"id", id},
+            {"obsolete", flags.obsolete},
+            {"hidden", flags.hidden},
+            {"owner", store.GetPackageUploader(id)}
+        })
+    End Sub
+
+    ''' <summary>
+    ''' may the given account change the public flags of the given package? the
+    ''' uploader account of the package owns it, and an account which carries the
+    ''' ``official`` badge acts as a server administrator.
+    ''' </summary>
+    ''' <param name="packageId">the package id.</param>
+    ''' <param name="email">the authenticated account.</param>
+    Private Function canManagePackage(packageId As String, email As String) As Boolean
+        Dim owner As String = store.GetPackageUploader(packageId)
+
+        If Not owner.StringEmpty() AndAlso
+           owner.Trim().Equals(If(email, "").Trim(), StringComparison.OrdinalIgnoreCase) Then
+            Return True
+        End If
+
+        Return store.IsUserOfficial(email)
+    End Function
+
+    ''' <summary>
+    ''' read the state of a package flag from the request: an absent or
+    ''' unrecognized value means <c>True</c>, so that the plain command marks the
+    ''' package, while ``false``/``off``/``no``/``0`` clears the flag again.
+    ''' </summary>
+    Private Shared Function parseFlagArgument(text As String) As Boolean
+        Select Case If(text, "").Trim().ToLowerInvariant()
+            Case "false", "off", "no", "0" : Return False
+            Case Else : Return True
+        End Select
+    End Function
+
+    ''' <summary>
+    ''' the human readable confirmation message of one package flag change.
+    ''' </summary>
+    Private Shared Function packageFlagMessage(packageId As String, flagName As String, flag As Boolean) As String
+        If flagName = "obsolete" Then
+            If flag Then
+                Return $"the package '{packageId}' is now marked as obsolete."
+            Else
+                Return $"the package '{packageId}' is no longer marked as obsolete."
+            End If
+        End If
+
+        If flag Then
+            Return $"the package '{packageId}' is now hidden: it is not listed, searchable, downloadable nor documented anymore."
+        Else
+            Return $"the package '{packageId}' is visible again."
+        End If
+    End Function
+
+    ''' <summary>
+    ''' refresh every cached view of the feed after the hidden state of a package
+    ''' changed: the static file mappings of the package, the precomputed
+    ''' statistics and the site map.
+    ''' </summary>
+    ''' <param name="packageId">the package id whose flag changed.</param>
+    Private Sub refreshHiddenPackageViews(packageId As String)
+        Call unregisterStaticFiles(packageId)
+        Call refreshStatistics()
+
+        ' the document database did not change, but the set of the public urls
+        ' did, so the sitemap is rebuilt on the next idle window
+        If sitemap IsNot Nothing Then
+            Call sitemap.NotifyDocsChanged()
+        End If
+    End Sub
+
+    ''' <summary>
+    ''' withdraw the static file mappings of one package.
+    ''' </summary>
+    ''' <remarks>
+    ''' the host consults its file system listener before the controller routes,
+    ''' and the mapping table of the listener has no removal entry point, so each
+    ''' recorded url is re-mapped onto a file which does not exist: the listener
+    ''' then reports the resource as missing, the request falls through to the
+    ''' controller and no hidden package file can leak through ``/packages/...``
+    ''' while the server keeps running.
+    ''' </remarks>
+    ''' <param name="packageId">the package id.</param>
+    Private Sub unregisterStaticFiles(packageId As String)
+        If router Is Nothing OrElse router.FileSystem Is Nothing Then
+            Return
+        End If
+
+        Dim key As String = If(packageId, "").Trim()
+        If key.StringEmpty() Then
+            Return
+        End If
+
+        Dim fs As Flute.Http.FileSystem.FileSystem = router.FileSystem.fs(0)
+        Dim idLower As String = key.ToLowerInvariant()
+        Dim missing As String = Path.Combine(config.TempDirectory, ".unmapped-package")
+
+        For Each pkg As PackageRecord In store.ReadAllPackages()
+            If pkg.package_id Is Nothing OrElse Not pkg.package_id.Equals(key, StringComparison.OrdinalIgnoreCase) Then
+                Continue For
+            End If
+
+            Dim versionLower As String = If(pkg.version, "").ToLowerInvariant()
+
+            Call fs.AddMapping($"/packages/{idLower}/{versionLower}/{idLower}.{versionLower}.nupkg", missing)
+            Call fs.AddMapping($"/packages/{idLower}/{versionLower}/{idLower}.nuspec", missing)
+        Next
+    End Sub
+
+#End Region
+
 #Region "web front end json api"
 
     <HttpGet("/api/packages")>
@@ -934,7 +1125,7 @@ Public Class Service
         Next
 
         Dim recent As New List(Of Object)
-        For Each pkg As PackageRecord In store.ReadAllPackages().OrderByDescending(Function(p) p.published).Take(10)
+        For Each pkg As PackageRecord In store.ReadVisiblePackages().OrderByDescending(Function(p) p.published).Take(10)
             recent.Add(New Dictionary(Of String, Object) From {
                 {"id", pkg.package_id},
                 {"version", pkg.version},
@@ -1064,6 +1255,7 @@ Public Class Service
             {"selectedVersion", latest.version},
             {"totalDownloads", versions.Sum(Function(v) v.downloads)},
             {"published", isoDate(latest.published)},
+            {"obsolete", store.IsPackageObsolete(latest.package_id)},
             {"uploader", uploader},
             {"uploaderOfficial", uploaderOfficial},
             {"uploaderDemo", uploaderFlags.demo},
@@ -1303,7 +1495,8 @@ Public Class Service
             {"projectUrl", pkg.project_url},
             {"totalDownloads", pkg.total_downloads},
             {"versions", pkg.versions},
-            {"published", isoDate(pkg.published)}
+            {"published", isoDate(pkg.published)},
+            {"obsolete", pkg.obsolete}
         }
     End Function
 
@@ -1525,17 +1718,17 @@ Public Class Service
 
     <HttpGet("/api/stats/tags")>
     Public Sub ApiStatsTags(req As HttpRequest, res As HttpResponse)
-        Call writeStatistic(res, NugetStatistics.TagsStatName, Function() NugetStatistics.BuildTags(store.ReadAllPackages()))
+        Call writeStatistic(res, NugetStatistics.TagsStatName, Function() NugetStatistics.BuildTags(store.ReadVisiblePackages()))
     End Sub
 
     <HttpGet("/api/stats/tag-network")>
     Public Sub ApiStatsTagNetwork(req As HttpRequest, res As HttpResponse)
-        Call writeStatistic(res, NugetStatistics.TagNetworkStatName, Function() NugetStatistics.BuildTagNetwork(store.ReadAllPackages()))
+        Call writeStatistic(res, NugetStatistics.TagNetworkStatName, Function() NugetStatistics.BuildTagNetwork(store.ReadVisiblePackages()))
     End Sub
 
     <HttpGet("/api/stats/dependency-network")>
     Public Sub ApiStatsDependencyNetwork(req As HttpRequest, res As HttpResponse)
-        Call writeStatistic(res, NugetStatistics.DependencyNetworkStatName, Function() NugetStatistics.BuildDependencyNetwork(store.ReadAllPackages()))
+        Call writeStatistic(res, NugetStatistics.DependencyNetworkStatName, Function() NugetStatistics.BuildDependencyNetwork(store.ReadVisiblePackages()))
     End Sub
 
     ''' <summary>
@@ -1642,7 +1835,7 @@ Public Class Service
     ''' summary of the produced documents.
     ''' </summary>
     Private Function refreshStatistics() As Dictionary(Of String, Object)
-        Dim packages As List(Of PackageRecord) = store.ReadAllPackages()
+        Dim packages As List(Of PackageRecord) = store.ReadVisiblePackages()
 
         Dim tags As String = NugetStatistics.BuildTags(packages)
         Dim tagNetwork As String = NugetStatistics.BuildTagNetwork(packages)
@@ -1721,6 +1914,12 @@ Public Class Service
         Dim version As String = routeValue(req, "version")
         Dim name As String = Uri.UnescapeDataString(routeValue(req, "name"))
         Dim html As String
+
+        ' the api documentation of a hidden package may not be read either
+        If store.IsPackageHidden(id) Then
+            res.WriteError(HTTP_RFC.RFC_NOT_FOUND, $"the api document was not found: {id} {version} {name}")
+            Return
+        End If
 
         If name.Equals("index", StringComparison.OrdinalIgnoreCase) Then
             html = ApiDocPages.RenderPackageIndex(store, config, id, version)

@@ -134,6 +134,47 @@ Public Class NugetApiClient
     End Function
 
     ''' <summary>
+    ''' set (or clear) one of the two public flags of a package id: the
+    ''' ``obsolete`` marker and the ``hidden`` marker. the whole package id is
+    ''' flagged, and the server accepts the request from the uploader account of
+    ''' the package only.
+    ''' </summary>
+    ''' <param name="email">the registered user email.</param>
+    ''' <param name="code">the current TOTP code of the account.</param>
+    ''' <param name="packageId">the package id to flag.</param>
+    ''' <param name="flagName">either ``obsolete`` or ``hidden``.</param>
+    ''' <param name="value">the new state of the flag.</param>
+    ''' <param name="timeout">an optional request timeout.</param>
+    Public Function SetPackageFlag(email As String, code As String, packageId As String,
+                                   flagName As String, value As Boolean,
+                                   Optional timeout As TimeSpan? = Nothing) As ApiResult
+
+        ' the route of the hidden flag is spelled ``hide``
+        Dim route As String = If(String.Equals(flagName, "hidden", StringComparison.OrdinalIgnoreCase), "hide", flagName)
+
+        Using content As New FormUrlEncodedContent(New Dictionary(Of String, String) From {
+            {"email", email},
+            {"code", code},
+            {"id", packageId},
+            {"value", If(value, "true", "false")}
+        })
+            Using cts As CancellationTokenSource = createTimeout(timeout)
+                Try
+                    Using response As HttpResponseMessage = Http _
+                        .PostAsync($"{baseUrl}/api/package/{route}", content, cts.Token) _
+                        .GetAwaiter() _
+                        .GetResult()
+
+                        Return parse(response)
+                    End Using
+                Catch ex As OperationCanceledException
+                    Return timeoutResult(timeout)
+                End Try
+            End Using
+        End Using
+    End Function
+
+    ''' <summary>
     ''' create the cancellation token source that enforces the request timeout,
     ''' falling back to <see cref="DefaultTimeout"/> when none is given.
     ''' </summary>

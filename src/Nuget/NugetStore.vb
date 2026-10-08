@@ -1118,6 +1118,172 @@ Public Class NugetStore
 
 #End Region
 
+#Region "package flags (obsolete / hidden)"
+
+    ''' <summary>
+    ''' read the public flags of one package id. a package without a flag row is
+    ''' reported as an all-false record, so the caller never has to test for
+    ''' <c>Nothing</c>.
+    ''' </summary>
+    ''' <param name="packageId">the package id (compared case insensitively).</param>
+    ''' <returns>the obsolete / hidden state of the package id.</returns>
+    Public Function GetPackageFlags(packageId As String) As PackageFlagRecord
+        Dim result As New PackageFlagRecord With {
+            .package_id = If(packageId, "").Trim().ToLowerInvariant()
+        }
+
+        If result.package_id.StringEmpty() Then
+            Return result
+        End If
+
+        SyncLock sync
+            Dim flags As Dictionary(Of String, PackageFlagRecord) = packageFlagsNoLock()
+            Dim found As PackageFlagRecord = Nothing
+
+            If flags.TryGetValue(result.package_id, found) Then
+                Return found
+            End If
+
+            Return result
+        End SyncLock
+    End Function
+
+    ''' <summary>
+    ''' test whether the given package id carries the ``obsolete`` marker. the
+    ''' package is still served, but the web front end badges it as obsolete.
+    ''' </summary>
+    Public Function IsPackageObsolete(packageId As String) As Boolean
+        Return GetPackageFlags(packageId).obsolete
+    End Function
+
+    ''' <summary>
+    ''' test whether the given package id carries the ``hidden`` marker: the
+    ''' package is withdrawn from every public view of the server.
+    ''' </summary>
+    Public Function IsPackageHidden(packageId As String) As Boolean
+        Return GetPackageFlags(packageId).hidden
+    End Function
+
+    ''' <summary>
+    ''' the set of the hidden package ids, always in their lower-case form.
+    ''' </summary>
+    Public Function GetHiddenPackageIds() As HashSet(Of String)
+        SyncLock sync
+            Return hiddenPackageIdsNoLock()
+        End SyncLock
+    End Function
+
+    ''' <summary>
+    ''' set (or clear) one of the two public flags (``obsolete`` or ``hidden``)
+    ''' of the given package id.
+    ''' </summary>
+    ''' <param name="packageId">the package id; the whole id is flagged, not one version.</param>
+    ''' <param name="flagName">either ``obsolete`` or ``hidden``.</param>
+    ''' <param name="flag">the new state of the flag.</param>
+    Public Sub SetPackageFlag(packageId As String, flagName As String, flag As Boolean)
+        If String.IsNullOrEmpty(packageId) Then
+            Return
+        End If
+
+        Dim column As String = If(flagName, "").Trim().ToLowerInvariant()
+
+        If column <> "obsolete" AndAlso column <> "hidden" Then
+            Throw New ArgumentException($"unknown package flag: '{flagName}'")
+        End If
+
+        Dim key As String = packageId.Trim().ToLowerInvariant()
+
+        SyncLock sync
+            Dim now As Date = Date.UtcNow
+            Dim foundId As Long = packageFlagIdNoLock(key)
+
+            If foundId >= 0 Then
+                Call exec($"UPDATE package_flags SET {column} = {If(flag, "TRUE", "FALSE")}, updated = {dateLiteral(now)} WHERE id = {foundId}")
+            Else
+                Dim id As Long = nextId("package_flags")
+                Call exec(
+                    "INSERT INTO package_flags (id, package_id, obsolete, hidden, updated) VALUES (" &
+                    $"{id}, '{esc(key)}', {If(column = "obsolete", "TRUE", "FALSE")}, " &
+                    $"{If(column = "hidden", "TRUE", "FALSE")}, {dateLiteral(now)})")
+            End If
+        End SyncLock
+    End Sub
+
+    ''' <summary>
+    ''' set (or clear) the ``obsolete`` marker of the given package id.
+    ''' </summary>
+    Public Sub SetPackageObsolete(packageId As String, flag As Boolean)
+        Call SetPackageFlag(packageId, "obsolete", flag)
+    End Sub
+
+    ''' <summary>
+    ''' set (or clear) the ``hidden`` marker of the given package id.
+    ''' </summary>
+    Public Sub SetPackageHidden(packageId As String, flag As Boolean)
+        Call SetPackageFlag(packageId, "hidden", flag)
+    End Sub
+
+    ''' <summary>
+    ''' read every flag row of the ``package_flags`` table, keyed by the lower
+    ''' case package id.
+    ''' </summary>
+    Private Function packageFlagsNoLock() As Dictionary(Of String, PackageFlagRecord)
+        Dim flags As New Dictionary(Of String, PackageFlagRecord)(StringComparer.OrdinalIgnoreCase)
+        Dim rs As ResultSet = query("SELECT package_id, obsolete, hidden, updated FROM package_flags")
+
+        If rs IsNot Nothing AndAlso rs.IsQuery Then
+            For Each row As Object() In rs.Rows
+                Dim item As New PackageFlagRecord With {
+                    .package_id = toStr(row(0)).Trim().ToLowerInvariant(),
+                    .obsolete = toBool(row(1)),
+                    .hidden = toBool(row(2)),
+                    .updated = toDate(row(3))
+                }
+
+                If Not item.package_id.StringEmpty() Then
+                    flags(item.package_id) = item
+                End If
+            Next
+        End If
+
+        Return flags
+    End Function
+
+    ''' <summary>
+    ''' the set of the hidden package ids (lower case), read from the flag table.
+    ''' </summary>
+    Private Function hiddenPackageIdsNoLock() As HashSet(Of String)
+        Dim set_ As New HashSet(Of String)(StringComparer.OrdinalIgnoreCase)
+
+        For Each item As PackageFlagRecord In packageFlagsNoLock().Values
+            If item.hidden Then
+                Call set_.Add(item.package_id)
+            End If
+        Next
+
+        Return set_
+    End Function
+
+    ''' <summary>
+    ''' the primary key of the flag row of the given package id, or -1 when the
+    ''' package has no flag row yet.
+    ''' </summary>
+    Private Function packageFlagIdNoLock(packageId As String) As Long
+        Dim rs As ResultSet = query("SELECT id, package_id FROM package_flags")
+
+        If rs IsNot Nothing AndAlso rs.IsQuery Then
+            For Each row As Object() In rs.Rows
+                If String.Equals(toStr(row(1)).Trim(), packageId, StringComparison.OrdinalIgnoreCase) Then
+                    Return toLong(row(0))
+                End If
+            Next
+        End If
+
+        Return -1
+    End Function
+
+#End Region
+
 #Region "daily activity"
 
     ''' <summary>
@@ -1637,18 +1803,30 @@ Public Class NugetStore
     End Function
 
     ''' <summary>
-    ''' test whether the package id exists in the feed (any version).
+    ''' test whether the package id exists in the feed (any version) and is not
+    ''' hidden.
     ''' </summary>
     Public Function PackageExists(packageId As String) As Boolean
-        Dim rs As ResultSet = query($"SELECT package_id FROM packages WHERE package_id = '{esc(packageId)}'")
-        If rs IsNot Nothing AndAlso rs.IsQuery Then
-            For Each row As Object() In rs.Rows
-                If String.Equals(toStr(row(0)), packageId, StringComparison.OrdinalIgnoreCase) Then
-                    Return True
-                End If
-            Next
-        End If
-        Return False
+        Return PackageIdExists(packageId) AndAlso Not IsPackageHidden(packageId)
+    End Function
+
+    ''' <summary>
+    ''' test whether the package id exists in the feed (any version), ignoring
+    ''' the hidden flag: the administrative flag operations use this raw test,
+    ''' so that a hidden package can still be marked and unmarked.
+    ''' </summary>
+    Public Function PackageIdExists(packageId As String) As Boolean
+        SyncLock sync
+            Dim rs As ResultSet = query($"SELECT package_id FROM packages WHERE package_id = '{esc(packageId)}'")
+            If rs IsNot Nothing AndAlso rs.IsQuery Then
+                For Each row As Object() In rs.Rows
+                    If String.Equals(toStr(row(0)), packageId, StringComparison.OrdinalIgnoreCase) Then
+                        Return True
+                    End If
+                Next
+            End If
+            Return False
+        End SyncLock
     End Function
 
     ''' <summary>
@@ -1984,10 +2162,33 @@ Public Class NugetStore
 
     ''' <summary>
     ''' read the type index rows of every package version (without the payload).
+    ''' the api documents of a hidden package are excluded, so the global
+    ''' document index and the sitemap never link them.
     ''' </summary>
+    ''' <param name="includeHidden">
+    ''' include the documents of the hidden packages as well; the sitemap
+    ''' fingerprint uses it so that hiding a package invalidates the sitemap.
+    ''' </param>
     ''' <returns></returns>
-    Public Function ReadApiDocIndex() As List(Of PackageApiDocRecord)
-        Return queryApiDocs(includePayload:=False)
+    Public Function ReadApiDocIndex(Optional includeHidden As Boolean = False) As List(Of PackageApiDocRecord)
+        Dim records As List(Of PackageApiDocRecord) = queryApiDocs(includePayload:=False)
+
+        If includeHidden Then
+            Return records
+        End If
+
+        SyncLock sync
+            Dim hidden As HashSet(Of String) = hiddenPackageIdsNoLock()
+
+            If hidden.Count = 0 Then
+                Return records
+            End If
+
+            Return records _
+                .Where(Function(r) r.package_id IsNot Nothing AndAlso
+                                    Not hidden.Contains(r.package_id.Trim().ToLowerInvariant())) _
+                .ToList()
+        End SyncLock
     End Function
 
     ''' <summary>

@@ -17,10 +17,12 @@ Module Program
         vbCrLf &
         "usage:" & vbCrLf &
         "  xGet register --server <url> --email <email>" & vbCrLf &
-        "  xGet activate --server <url> --email <email> --code <base64 authorization code>
-  xGet reset    --server <url> --email <email>  (mails a fresh authorization code)" & vbCrLf &
+        "  xGet activate --server <url> --email <email> --code <base64 authorization code>" & vbCrLf &
+        "  xGet reset    --server <url> --email <email>  (mails a fresh authorization code)" & vbCrLf &
         "  xGet upload   --server <url> --email <email> --file <package.nupkg> [--timeout <minutes>]" & vbCrLf &
         "  xGet batch    --server <url> --email <email> --dir <folder> [--recursive] [--symbols] [--timeout <minutes>]" & vbCrLf &
+        "  xGet obsolete --server <url> --email <email> --id <package-id> [--off]" & vbCrLf &
+        "  xGet hide     --server <url> --email <email> --id <package-id> [--off]" & vbCrLf &
         vbCrLf &
         "options:" & vbCrLf &
         "  --server, -s   the nuget server base url, e.g. http://localhost:80" & vbCrLf &
@@ -28,9 +30,20 @@ Module Program
         "  --code,   -c   the base64 authorization code of the email verification success page" & vbCrLf &
         "  --file,   -f   the .nupkg file to upload" & vbCrLf &
         "  --dir,    -d   the folder to scan for batch upload" & vbCrLf &
+        "  --id,     -i   the package id of the obsolete / hide command (a trailing id works too)" & vbCrLf &
+        "  --off          clear the obsolete / hide flag again instead of setting it" & vbCrLf &
         "  --recursive    scan the sub directories too" & vbCrLf &
         "  --symbols      also upload the *.snupkg / *.symbols.nupkg packages" & vbCrLf &
         "  --timeout, -t  the upload timeout in minutes (default: 15, decimals allowed)" & vbCrLf &
+        vbCrLf &
+        "package state:" & vbCrLf &
+        "  only the account which uploaded a package may change its state, and the" & vbCrLf &
+        "  state is applied to the whole package id (every version of it):" & vbCrLf &
+        "    obsolete  the package is still served and documented, but the web page" & vbCrLf &
+        "              badges it as obsolete;" & vbCrLf &
+        "    hide      the package is withdrawn from every public view: it is not" & vbCrLf &
+        "              listed, not searchable, not downloadable and its api" & vbCrLf &
+        "              documentation is not readable anymore." & vbCrLf &
         vbCrLf &
         "registration flow:" & vbCrLf &
         "  1. xGet register asks the server to send a verification mail to your inbox;" & vbCrLf &
@@ -58,6 +71,10 @@ Module Program
                 Return upload(options)
             Case "batch", "upload-dir"
                 Return batch(options)
+            Case "obsolete", "deprecate"
+                Return packageFlag(options, "obsolete")
+            Case "hide", "unlist", "hidden"
+                Return packageFlag(options, "hidden")
             Case "help", "?", "h"
                 Call printUsage()
                 Return 0
@@ -296,6 +313,50 @@ Module Program
     End Function
 
     ''' <summary>
+    ''' set (or clear with ``--off``) one of the two public package flags of a
+    ''' package id: the ``obsolete`` marker and the ``hidden`` marker. the
+    ''' operation is authenticated with the TOTP secret of the local account
+    ''' store, and the server accepts it from the uploader account of the
+    ''' package only.
+    ''' </summary>
+    ''' <param name="options">the parsed command line options.</param>
+    ''' <param name="flagName">either ``obsolete`` or ``hidden``.</param>
+    Private Function packageFlag(options As Dictionary(Of String, String), flagName As String) As Integer
+        Dim server As String = getOption(options, "server", "s")
+        Dim email As String = getOption(options, "email", "e")
+        Dim id As String = getOption(options, "id", "package", "p", "name", "_1")
+
+        If String.IsNullOrEmpty(server) OrElse String.IsNullOrEmpty(email) OrElse String.IsNullOrEmpty(id) Then
+            Call Console.WriteLine($"usage: xGet {flagName} --server <url> --email <email> --id <package-id> [--off]")
+            Return 1
+        End If
+
+        ' the flag is set by default; --off clears it again
+        Dim flag As Boolean = Not hasFlag(options, "off", "unset", "clear", "disable")
+
+        Dim account As New AccountStore()
+        Dim secret As String = account.GetSecret(server, email)
+
+        If String.IsNullOrEmpty(secret) Then
+            Call Console.WriteLine($"no TOTP secret was found for '{email}' on {server}.")
+            Call Console.WriteLine("please register this email first: xGet register --server <url> --email <email>")
+            Return 1
+        End If
+
+        Dim code As String = Nuget.TotpModule.GenerateTotp(secret)
+        Dim client As New NugetApiClient(server)
+        Dim result As ApiResult = client.SetPackageFlag(email, code, id, flagName, flag)
+
+        If result Is Nothing OrElse Not result.ok Then
+            Call Console.WriteLine($"{flagName} failed: {If(result?.message, "unknown error")}")
+            Return 2
+        End If
+
+        Call Console.WriteLine(result.message)
+        Return 0
+    End Function
+
+    ''' <summary>
     ''' scan a folder for nuget packages and upload them one by one, reusing the
     ''' stored TOTP secret of the given email.
     ''' </summary>
@@ -421,9 +482,16 @@ Module Program
         Return False
     End Function
 
+    ''' <summary>
+    ''' parse the command line options. every ``--name value`` (or ``--name=value``)
+    ''' token is stored under its name; a bare token is stored as the numbered
+    ''' positional argument ``_1``, ``_2``, ... so that a package id can also be
+    ''' given as a trailing word of the command.
+    ''' </summary>
     Private Function parseOptions(args As String()) As Dictionary(Of String, String)
         Dim options As New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase)
         Dim i As Integer = 1
+        Dim positionals As Integer = 0
 
         While i < args.Length
             Dim token As String = args(i)
@@ -446,6 +514,8 @@ Module Program
                     options(name) = value
                 End If
             Else
+                positionals += 1
+                options("_" & positionals.ToString(CultureInfo.InvariantCulture)) = token
                 i += 1
             End If
         End While
