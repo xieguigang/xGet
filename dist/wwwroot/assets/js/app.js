@@ -67,7 +67,9 @@
     function fetchJSON(url) {
         return fetch(url, { headers: { Accept: 'application/json' } }).then(function (response) {
             if (!response.ok) {
-                throw new Error('HTTP ' + response.status);
+                var error = new Error('HTTP ' + response.status);
+                error.status = response.status;
+                throw error;
             }
             return response.json();
         });
@@ -76,7 +78,9 @@
     function fetchText(url) {
         return fetch(url, { headers: { Accept: 'text/plain, text/markdown' } }).then(function (response) {
             if (!response.ok) {
-                throw new Error('HTTP ' + response.status);
+                var error = new Error('HTTP ' + response.status);
+                error.status = response.status;
+                throw error;
             }
             return response.text();
         });
@@ -106,6 +110,42 @@
     function queryParam(name) {
         var params = new URLSearchParams(window.location.search);
         return params.get(name) || '';
+    }
+
+    /* ----------------------------- not found ----------------------------- */
+
+    /* send the browser to the shared 404 page. every page which renders a
+       single named resource (a package, an account, the dependents of a
+       package) uses it when the server reports that the resource does not
+       exist: a hidden package and a package which was never published are
+       answered identically, so the page never reveals that a package exists
+       but was withdrawn. ``location.replace`` keeps the broken url out of the
+       browser history, so the back button does not bounce onto it again. */
+    function notFound(params) {
+        var query = [];
+
+        Object.keys(params || {}).forEach(function (key) {
+            var value = params[key];
+            if (value !== undefined && value !== null && String(value) !== '') {
+                query.push(encodeURIComponent(key) + '=' + encodeURIComponent(String(value)));
+            }
+        });
+
+        window.location.replace('404.html' + (query.length ? '?' + query.join('&') : ''));
+    }
+
+    /* the shared error report of a single resource page: a missing resource is
+       redirected to the 404 page, while a transport or server failure keeps the
+       inline message so that the visitor can simply retry. */
+    function reportLoadFailure(host, error, params, message) {
+        if (error && error.status === 404) {
+            notFound(params);
+            return;
+        }
+
+        if (host) {
+            host.innerHTML = '<div class="empty">' + esc(message) + ': ' + esc(error ? error.message : 'unknown error') + '</div>';
+        }
     }
 
     /* ----------------------------- statistics ----------------------------- */
@@ -678,7 +718,8 @@
         fetchJSON('/api/package/' + encodeURIComponent(id)).then(function (pkg) {
             renderPackageDetail(pkg);
         }).catch(function (error) {
-            host.innerHTML = '<div class="empty">failed to load package "' + esc(id) + '": ' + esc(error.message) + '</div>';
+            reportLoadFailure(host, error, { type: 'package', id: id },
+                'failed to load package "' + id + '"');
         });
     }
 
@@ -1167,7 +1208,8 @@
             });
             loadUserActivity(profile.email, 30);
         }).catch(function (error) {
-            host.innerHTML = '<div class="empty">failed to load the account "' + esc(email) + '": ' + esc(error.message) + '</div>';
+            reportLoadFailure(host, error, { type: 'user', id: email },
+                'failed to load the account "' + email + '"');
         });
     }
 
@@ -1222,7 +1264,8 @@
                 '<thead><tr><th>Package</th><th>Latest</th><th>Version Range</th><th class="num">Downloads</th></tr></thead>' +
                 '<tbody>' + rows + '</tbody></table></div>';
         }).catch(function (error) {
-            host.innerHTML = '<div class="empty">failed to load the dependents: ' + esc(error.message) + '</div>';
+            reportLoadFailure(host, error, { type: 'package', id: id },
+                'failed to load the dependents');
         });
     }
 

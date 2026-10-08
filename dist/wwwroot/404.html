@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>Not found · nuget</title>
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <link rel="stylesheet" href="assets/css/scibasic.css" />
+</head>
+
+<body data-page="404">
+
+    <header class="topbar">
+        <a class="brand" href="index.html">
+            <img src="favicon.png" alt="nuget server logo" onerror="this.style.display='none'" />
+            <strong>nuget</strong>
+            <span class="sub">package server</span>
+        </a>
+        <nav class="topnav">
+            <a href="index.html">Packages</a>
+            <a href="about.html">Statistics</a>
+            <a href="graph.html">Graphs</a>
+            <a href="docs/index.html">API Docs</a>
+            <a href="v3/index.json">Service Index</a>
+        </nav>
+        <a class="home-btn" href="index.html" title="Back to packages" aria-label="Back">↖</a>
+    </header>
+
+    <main class="wrap">
+        <p class="eyebrow"><b>404</b> <span>Not Found — <span id="nf-crumb">…</span></span></p>
+
+        <article class="nf-article">
+            <h1 class="headline">Nothing here <span class="accent">·</span> <span class="u">404</span></h1>
+
+            <p class="lede" id="nf-headline">The page or resource you asked for does not exist on this server.</p>
+
+            <p class="nf-detail" id="nf-detail"></p>
+
+            <div class="nf-hints">
+                <p class="sec-label"><b>01</b> <span>What can I do?</span></p>
+                <ul class="nf-list">
+                    <li>check the spelling of the package id or of the email address;</li>
+                    <li>search the feed for the package with the box below;</li>
+                    <li>browse the <a class="dl" href="index.html">package list</a> or the
+                        <a class="dl" href="docs/index.html">api documentation</a>.</li>
+                </ul>
+                <p class="note">A package which its owner has withdrawn (hidden) is answered exactly like a
+                    package which was never published here, so this page never reveals whether a package
+                    exists but is not public.</p>
+            </div>
+
+            <form class="nf-search" id="nf-search" role="search">
+                <div class="search">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                        <circle cx="11" cy="11" r="7"></circle>
+                        <line x1="16.5" y1="16.5" x2="21" y2="21"></line>
+                    </svg>
+                    <input id="nf-query" type="search" placeholder="search the feed for a package…"
+                        aria-label="search the feed for a package" autocomplete="off" />
+                </div>
+                <button class="btn solid" type="submit">Search</button>
+            </form>
+
+            <div class="nf-actions">
+                <a class="btn" href="index.html">← all packages</a>
+                <a class="btn" href="about.html">statistics</a>
+                <a class="btn" href="docs/index.html">api docs</a>
+            </div>
+        </article>
+    </main>
+
+    <footer class="site">
+        <div class="pn">
+            <a href="index.html"><span>Previous</span>Packages</a>
+            <a href="about.html"><span>Next</span>Statistics</a>
+        </div>
+        <div class="legal"><a href="https://github.com/xieguigang/xGet">nuget · experimental feed</a> · powered by <a
+                href="https://github.com/xieguigang/flute">Fluteway</a> + <a
+                href="https://github.com/xieguigang/JSql">JSql</a> · <a href="sitemap.xml">Sitemap</a></div>
+    </footer>
+
+    <script src="assets/js/app.js"></script>
+</body>
+
+</html>

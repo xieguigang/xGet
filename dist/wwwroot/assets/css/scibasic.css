@@ -553,8 +553,70 @@ a.dl:hover::after {
     word-break: break-all;
 }
 
-/* ===================== states ===================== */
+/* ===================== 404 page ===================== */
 
+.nf-article {
+    max-width: 720px;
+    margin: 8px 0 60px;
+}
+
+.nf-detail {
+    margin-top: 18px;
+    padding: 14px 18px;
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    border-left: 2px solid var(--gold);
+    border-radius: 2px;
+    color: var(--ink-dim);
+    font-size: 13.5px;
+    line-height: 1.7;
+}
+
+.nf-detail:empty {
+    display: none;
+}
+
+.nf-hints {
+    margin-top: 32px;
+}
+
+.nf-list {
+    margin: 14px 0 0;
+    padding-left: 20px;
+    color: var(--ink-dim);
+    font-size: 13px;
+    line-height: 1.9;
+}
+
+.nf-list a {
+    color: var(--ink);
+}
+
+.nf-search {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 30px;
+    flex-wrap: wrap;
+}
+
+.nf-search .search {
+    flex: 1;
+    min-width: 240px;
+}
+
+.nf-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 22px;
+    flex-wrap: wrap;
+}
+
+.nf-actions .btn {
+    text-decoration: none;
+}
+
+/* ===================== states ===================== */
 .loading,
 .empty {
     padding: 46px 18px;
