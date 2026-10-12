@@ -439,8 +439,8 @@ Module Program
                    message.IndexOf("invalid email", StringComparison.OrdinalIgnoreCase) >= 0 Then
                 failed += 1
                 Call Console.WriteLine($"[{i + 1}/{files.Count}] FAILED  {name}: {message} ({elapsed})")
-                Call Console.WriteLine($"authentication failed, aborting the batch upload (total {formatElapsed(totalWatch.Elapsed)}).")
-                Return 3
+                Call Console.WriteLine($"authentication failed, skip upload of this package ({elapsed}).")
+                ' Return 3
             Else
                 failed += 1
                 Call Console.WriteLine($"[{i + 1}/{files.Count}] failed  {name}: {message} ({elapsed})")
