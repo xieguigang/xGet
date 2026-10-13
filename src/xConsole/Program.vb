@@ -49,6 +49,8 @@ Module Program
         "  db checkpoint [--force]    merge the pending write ahead logs" & vbCrLf &
         "  cluster rebuild [--k N]    re-run the package umap + kmeans cluster analysis" & vbCrLf &
         "  package list               list the packages with their obsolete / hidden state" & vbCrLf &
+        "  package list --anonymous   list the package ids without an uploader / owner" & vbCrLf &
+        "  package list --owner <email>   list the packages associated with one account" & vbCrLf &
         "  package obsolete <id> <on|off>  mark or unmark a package as obsolete" & vbCrLf &
         "  package hide <id> <on|off>      hide or unhide a package from every public view" & vbCrLf &
         "  package owner list <id>         list the owners of one package id" & vbCrLf &
@@ -375,6 +377,19 @@ Module Program
 
         Select Case action
             Case "list", "ls"
+                ' the anonymous filter enumerates the package ids which have no
+                ' uploader / owner association recorded in the database.
+                If hasFlag(options, "anonymous") Then
+                    Return listAnonymousPackages()
+                End If
+
+                ' the owner filter enumerates the packages associated with one
+                ' account (as uploader or manually assigned owner).
+                Dim ownerEmail As String = getOption(options, "owner")
+                If Not String.IsNullOrWhiteSpace(ownerEmail) Then
+                    Return listPackagesByOwner(ownerEmail)
+                End If
+
                 Dim all As List(Of PackageRecord) = store.ReadAllPackages()
                 Dim ids As List(Of String) = all _
                     .Where(Function(p) Not String.IsNullOrEmpty(p.package_id)) _
@@ -412,6 +427,51 @@ Module Program
                 Call Console.WriteLine("available actions: list, obsolete, hide, owner")
                 Return 1
         End Select
+    End Function
+
+    ''' <summary>
+    ''' the ``package list --anonymous`` action: print the package ids which have
+    ''' no uploader nor owner association recorded in the database.
+    ''' </summary>
+    Private Function listAnonymousPackages() As Integer
+        Dim ids As List(Of String) = store.GetAnonymousPackageIds()
+
+        Call Console.WriteLine($"packages without an uploader / owner association: {ids.Count}")
+        Call Console.WriteLine()
+
+        If ids.Count = 0 Then
+            Call Console.WriteLine("  (every package has at least one uploader or owner recorded)")
+            Return 0
+        End If
+
+        For Each id As String In ids
+            Call Console.WriteLine($"  {id}")
+        Next
+
+        Return 0
+    End Function
+
+    ''' <summary>
+    ''' the ``package list --owner &lt;email&gt;`` action: print the package ids which
+    ''' the given account is associated with (as uploader or manually assigned
+    ''' owner).
+    ''' </summary>
+    Private Function listPackagesByOwner(email As String) As Integer
+        Dim ids As List(Of String) = store.GetPackagesByOwner(email)
+
+        Call Console.WriteLine($"packages associated with '{email}': {ids.Count}")
+        Call Console.WriteLine()
+
+        If ids.Count = 0 Then
+            Call Console.WriteLine("  (no package is associated with this account)")
+            Return 0
+        End If
+
+        For Each id As String In ids
+            Call Console.WriteLine($"  {id}")
+        Next
+
+        Return 0
     End Function
 
     ''' <summary>

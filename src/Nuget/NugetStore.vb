@@ -2483,17 +2483,106 @@ Public Class NugetStore
 
                     If Not mail.StringEmpty() AndAlso
                        Not list.Any(Function(e) e.Equals(mail, StringComparison.OrdinalIgnoreCase)) Then
-                        Call list.Add(mail)
+                            Call list.Add(mail)
+                        End If
+                    Next
                     End If
-                Next
-            End If
-        End SyncLock
+                    End SyncLock
 
-        Return list
-    End Function
+                    Return list
+                    End Function
 
-    ''' <summary>
-    ''' associate one account with one package id as its manually assigned
+                    ''' <summary>
+                    ''' enumerate every package id that carries no owner / uploader association:
+                    ''' the package id exists in the ``packages`` table but has no row in either
+                    ''' the ``package_uploaders`` or the ``package_owners`` table. the comparison
+                    ''' is case insensitive so that an uploader row spelled differently from the
+                    ''' ``packages`` row still counts as an association.
+                    ''' </summary>
+                    Public Function GetAnonymousPackageIds() As List(Of String)
+                    SyncLock sync
+                    Dim ids As New HashSet(Of String)(StringComparer.OrdinalIgnoreCase)
+                    Dim rs As ResultSet = query("SELECT package_id FROM packages")
+
+                    If rs IsNot Nothing AndAlso rs.IsQuery Then
+                    For Each row As Object() In rs.Rows
+                        Dim id As String = toStr(row(0)).Trim()
+
+                        If Not id.StringEmpty() Then
+                            Call ids.Add(id)
+                        End If
+                    Next
+                    End If
+
+                    ' drop the ids that have at least one recorded uploader
+                    rs = query("SELECT DISTINCT package_id FROM package_uploaders")
+                    If rs IsNot Nothing AndAlso rs.IsQuery Then
+                    For Each row As Object() In rs.Rows
+                        Call ids.Remove(toStr(row(0)).Trim())
+                    Next
+                    End If
+
+                    ' drop the ids that have at least one manually assigned owner
+                    rs = query("SELECT DISTINCT package_id FROM package_owners")
+                    If rs IsNot Nothing AndAlso rs.IsQuery Then
+                    For Each row As Object() In rs.Rows
+                        Call ids.Remove(toStr(row(0)).Trim())
+                    Next
+                    End If
+
+                    Return ids _
+                    .Where(Function(id) Not id.StringEmpty()) _
+                    .OrderBy(Function(id) id, StringComparer.OrdinalIgnoreCase) _
+                    .ToList()
+                    End SyncLock
+                    End Function
+
+                    ''' <summary>
+                    ''' enumerate every package id that the given account is associated with,
+                    ''' either as the uploader of one of its versions (``package_uploaders``) or
+                    ''' as a manually assigned owner (``package_owners``). the email is matched
+                    ''' case insensitively because the uploader rows keep the original spelling
+                    ''' while the owner rows are stored lower cased.
+                    ''' </summary>
+                    Public Function GetPackagesByOwner(email As String) As List(Of String)
+                    Dim ids As New HashSet(Of String)(StringComparer.OrdinalIgnoreCase)
+
+                    If String.IsNullOrEmpty(email) Then
+                    Return New List(Of String)
+                    End If
+
+                    Dim mail As String = email.Trim()
+
+                    SyncLock sync
+                    Dim rs As ResultSet = query("SELECT package_id, email FROM package_uploaders")
+
+                    If rs IsNot Nothing AndAlso rs.IsQuery Then
+                    For Each row As Object() In rs.Rows
+                        If String.Equals(toStr(row(1)).Trim(), mail, StringComparison.OrdinalIgnoreCase) Then
+                            Call ids.Add(toStr(row(0)).Trim())
+                        End If
+                    Next
+                    End If
+
+                    rs = query("SELECT package_id, email FROM package_owners")
+
+                    If rs IsNot Nothing AndAlso rs.IsQuery Then
+                    For Each row As Object() In rs.Rows
+                        If String.Equals(toStr(row(1)).Trim(), mail, StringComparison.OrdinalIgnoreCase) Then
+                            Call ids.Add(toStr(row(0)).Trim())
+                        End If
+                    Next
+                    End If
+                    End SyncLock
+
+                    Return ids _
+                    .Where(Function(id) Not id.StringEmpty()) _
+                    .OrderBy(Function(id) id, StringComparer.OrdinalIgnoreCase) _
+                    .ToList()
+                    End Function
+
+                    ''' <summary>
+                    ''' associate one account with one package id as its manually assigned
     ''' owner. the operation is idempotent: assigning an existing owner again
     ''' returns <c>False</c> and writes nothing.
     ''' </summary>
