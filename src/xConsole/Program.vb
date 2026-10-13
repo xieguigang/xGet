@@ -379,6 +379,8 @@ Module Program
     Private Function package(positional As List(Of String), options As Dictionary(Of String, String)) As Integer
         Dim action As String = If(positional.Count > 0, positional(0).ToLowerInvariant(), "list")
 
+        positional = New List(Of String)(positional.Skip(1))
+
         Select Case action
             Case "list", "ls"
                 ' the anonymous filter enumerates the package ids which have no

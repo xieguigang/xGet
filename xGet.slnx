@@ -59,17 +59,17 @@
       <Platform Solution="*|x64" Project="x64" />
     </Project>
     <Project Path="src/LSP/languageserver/languageserver.vbproj" Id="6e70405c-d964-456b-8cdc-54140e7b3e1d">
-      <Platform Solution="Release|x64" Project="x64" />
+      <Platform Solution="*|x64" Project="x64" />
     </Project>
     <Project Path="src/Nuget/Nuget.vbproj">
       <Platform Solution="*|x64" Project="x64" />
     </Project>
     <Project Path="src/Readership/Readership.vbproj" Id="b480d0c5-84ec-44f8-be0f-b3fb7640aa31">
-      <Platform Solution="Release|x64" Project="x64" />
+      <Platform Solution="*|x64" Project="x64" />
     </Project>
   </Folder>
   <Project Path="src/xConsole/xConsole.vbproj" Id="1973b731-e6fe-4d9f-b2d0-5ed11678ce16">
-    <Platform Solution="Release|x64" Project="x64" />
+    <Platform Solution="*|x64" Project="x64" />
   </Project>
   <Project Path="src/xGet/xGet.vbproj" Id="b217e061-6101-4314-850b-29c931e01485">
     <Platform Solution="*|x64" Project="x64" />

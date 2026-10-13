@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "xConsole": {
+      "commandName": "Project",
+      "commandLineArgs": "  package  owner add Microsoft.VisualBasic.Data.ChartPlots i@xieguigang.me --data ../data"
+    }
+  }
+}
