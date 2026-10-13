@@ -103,7 +103,11 @@ Module Program
         Dim dataDirectory As String = getOption(options, "data", "d")
 
         If String.IsNullOrEmpty(dataDirectory) Then
-            dataDirectory = Path.Combine(Directory.GetCurrentDirectory(), "data")
+            dataDirectory = Path.Combine(App.CurrentDirectory, "data")
+
+            If Not dataDirectory.DirectoryExists Then
+                dataDirectory = Path.Combine(App.HOME, "..", "data").GetDirectoryFullPath
+            End If
         End If
 
         config = NugetConfiguration.FromConfig(New Dictionary(Of String, String) From {
