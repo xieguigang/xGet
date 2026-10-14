@@ -1,5 +1,3 @@
-Imports System.Text
-
 ''' <summary>
 ''' light weight, compiler free text heuristics used to derive the completion /
 ''' hover / signature context at the cursor. there is deliberately no roslyn or
