@@ -1,5 +1,6 @@
 Imports System.Text
-Imports System.Text.Json.Nodes
+Imports Microsoft.VisualBasic.MIME.application.json
+Imports Microsoft.VisualBasic.MIME.application.json.Javascript
 Imports Readership
 
 ''' <summary>
@@ -35,7 +36,7 @@ Public Class CompletionProvider
     ''' (a completion list). returns an empty completion list (never null) when the
     ''' document or cursor can not be resolved.
     ''' </summary>
-    Public Function Provide(request As JsonNode, documents As Dictionary(Of String, String)) As JsonNode
+    Public Function Provide(request As JsonElement, documents As Dictionary(Of String, String)) As JsonElement
         Dim uri As String = JsonRpc.Str(request, "textDocument", "uri")
         Dim line As Integer = JsonRpc.Int(request, "position", "line")
         Dim character As Integer = JsonRpc.Int(request, "position", "character")
@@ -228,21 +229,21 @@ Public Class CompletionProvider
 
     Private Function BuildItem(label As String, kind As Integer, detail As String, docMarkdown As String) As JsonObject
         Dim item As New JsonObject()
-        item("label") = JsonValue.Create(label)
-        item("kind") = JsonValue.Create(kind)
+        item("label") = New JsonValue(label)
+        item("kind") = New JsonValue(kind)
 
         If Not String.IsNullOrEmpty(detail) Then
-            item("detail") = JsonValue.Create(detail)
+            item("detail") = New JsonValue(detail)
         End If
 
         If Not String.IsNullOrEmpty(docMarkdown) Then
             item("documentation") = New JsonObject From {
-                {"kind", JsonValue.Create("markdown")},
-                {"value", JsonValue.Create(docMarkdown)}
+                {"kind", New JsonValue("markdown")},
+                {"value", New JsonValue(docMarkdown)}
             }
         End If
 
-        item("insertText") = JsonValue.Create(label)
+        item("insertText") = New JsonValue(label)
         Return item
     End Function
 
@@ -254,7 +255,7 @@ Public Class CompletionProvider
         Next
 
         Return New JsonObject From {
-            {"isIncomplete", JsonValue.Create(False)},
+            {"isIncomplete", New JsonValue(False)},
             {"items", arr}
         }
     End Function

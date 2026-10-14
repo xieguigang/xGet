@@ -1,4 +1,5 @@
-Imports System.Text.Json.Nodes
+Imports Microsoft.VisualBasic.MIME.application.json
+Imports Microsoft.VisualBasic.MIME.application.json.Javascript
 Imports Readership
 
 ''' <summary>
@@ -18,7 +19,7 @@ Public Class SignatureHelpProvider
     ''' handle a textDocument/signatureHelp request. returns the LSP signature help
     ''' object, or <c>Nothing</c> when no matching method can be resolved.
     ''' </summary>
-    Public Function Provide(request As JsonNode, documents As Dictionary(Of String, String)) As JsonNode
+    Public Function Provide(request As JsonElement, documents As Dictionary(Of String, String)) As JsonElement
         Dim uri As String = JsonRpc.Str(request, "textDocument", "uri")
         Dim line As Integer = JsonRpc.Int(request, "position", "line")
         Dim character As Integer = JsonRpc.Int(request, "position", "character")
@@ -79,19 +80,19 @@ Public Class SignatureHelpProvider
 
         Return New JsonObject From {
             {"signatures", signatures},
-            {"activeSignature", JsonValue.Create(activeSignature)},
-            {"activeParameter", JsonValue.Create(ctx.activeParameter)}
+            {"activeSignature", New JsonValue(activeSignature)},
+            {"activeParameter", New JsonValue(ctx.activeParameter)}
         }
     End Function
 
     Private Function BuildSignature(m As ApiDocMember) As JsonObject
         Dim sig As New JsonObject()
-        sig("label") = JsonValue.Create(If(m.declaration, m.name))
+        sig("label") = New JsonValue(If(m.declaration, m.name))
 
         If Not String.IsNullOrEmpty(m.summary) Then
             sig("documentation") = New JsonObject From {
-                {"kind", JsonValue.Create("markdown")},
-                {"value", JsonValue.Create(m.summary.Trim())}
+                {"kind", New JsonValue("markdown")},
+                {"value", New JsonValue(m.summary.Trim())}
             }
         End If
 
@@ -100,7 +101,7 @@ Public Class SignatureHelpProvider
 
         For i As Integer = 0 To labels.Count - 1
             Dim p As New JsonObject()
-            p("label") = JsonValue.Create(labels(i))
+            p("label") = New JsonValue(labels(i))
 
             Dim doc As String = ""
             If m.parameters IsNot Nothing AndAlso i < m.parameters.Count AndAlso m.parameters(i) IsNot Nothing Then
@@ -109,8 +110,8 @@ Public Class SignatureHelpProvider
 
             If Not String.IsNullOrEmpty(doc) Then
                 p("documentation") = New JsonObject From {
-                    {"kind", JsonValue.Create("markdown")},
-                    {"value", JsonValue.Create(doc.Trim())}
+                    {"kind", New JsonValue("markdown")},
+                    {"value", New JsonValue(doc.Trim())}
                 }
             End If
 

@@ -1,5 +1,6 @@
 Imports System.Text
-Imports System.Text.Json.Nodes
+Imports Microsoft.VisualBasic.MIME.application.json
+Imports Microsoft.VisualBasic.MIME.application.json.Javascript
 Imports Readership
 
 ''' <summary>
@@ -19,7 +20,7 @@ Public Class HoverProvider
     ''' handle a textDocument/hover request. returns the LSP hover object, or
     ''' <c>Nothing</c> when nothing useful can be shown.
     ''' </summary>
-    Public Function Provide(request As JsonNode, documents As Dictionary(Of String, String)) As JsonNode
+    Public Function Provide(request As JsonElement, documents As Dictionary(Of String, String)) As JsonElement
         Dim uri As String = JsonRpc.Str(request, "textDocument", "uri")
         Dim line As Integer = JsonRpc.Int(request, "position", "line")
         Dim character As Integer = JsonRpc.Int(request, "position", "character")
@@ -43,12 +44,12 @@ Public Class HoverProvider
         End If
 
         Dim range As New JsonObject From {
-            {"start", New JsonObject From {{"line", JsonValue.Create(line)}, {"character", JsonValue.Create(ctx.wordStart)}}},
-            {"end", New JsonObject From {{"line", JsonValue.Create(line)}, {"character", JsonValue.Create(ctx.wordStart + ctx.word.Length)}}}
+            {"start", New JsonObject From {{"line", New JsonValue(line)}, {"character", New JsonValue(ctx.wordStart)}}},
+            {"end", New JsonObject From {{"line", New JsonValue(line)}, {"character", New JsonValue(ctx.wordStart + ctx.word.Length)}}}
         }
 
         Return New JsonObject From {
-            {"contents", New JsonObject From {{"kind", JsonValue.Create("markdown")}, {"value", JsonValue.Create(markdown)}}},
+            {"contents", New JsonObject From {{"kind", New JsonValue("markdown")}, {"value", New JsonValue(markdown)}}},
             {"range", range}
         }
     End Function
