@@ -180,6 +180,54 @@ Public Class NugetConfiguration
     Public ReadOnly Property ApiDocWorkerTimeoutSeconds As Integer
 
     ''' <summary>
+    ''' whether the api document generation runs inside the long living
+    ''' ``ApiDocWorker`` daemon instead of the request thread. configuration key
+    ''' ``apidoc-worker-enabled``, default True.
+    ''' </summary>
+    Public ReadOnly Property ApiDocWorkerEnabled As Boolean
+
+    ''' <summary>
+    ''' an optional explicit path of the worker executable. when it is empty the
+    ''' ``ApiDocWorker.exe``/``ApiDocWorker.dll`` next to the server assembly is
+    ''' used. configuration key ``apidoc-worker-path``.
+    ''' </summary>
+    Public ReadOnly Property ApiDocWorkerPath As String
+
+    ''' <summary>
+    ''' the interval in seconds of the reconciliation pass which fills the
+    ''' missing static pages and removes the stale ones. configuration key
+    ''' ``apidoc-worker-reconcile-seconds``, default 300.
+    ''' </summary>
+    Public ReadOnly Property ApiDocWorkerReconcileSeconds As Integer
+
+    ''' <summary>
+    ''' how many times a failed document job is retried before it is dropped.
+    ''' configuration key ``apidoc-worker-max-attempts``, default 3.
+    ''' </summary>
+    Public ReadOnly Property ApiDocWorkerMaxAttempts As Integer
+
+    ''' <summary>
+    ''' whether an upload falls back to the in-process document extraction when
+    ''' the daemon is disabled or could not be started. configuration key
+    ''' ``apidoc-worker-fallback-sync``, default True.
+    ''' </summary>
+    Public ReadOnly Property ApiDocWorkerFallbackSync As Boolean
+
+    ''' <summary>
+    ''' the physical root folder of the generated static document pages.
+    ''' configuration key ``docs-static-output``, default is the ``docs``
+    ''' folder below the ``wwwroot`` folder.
+    ''' </summary>
+    Public ReadOnly Property DocsStaticDirectory As String
+
+    ''' <summary>
+    ''' whether the generated document pages carry the 1x1 view counter pixel
+    ''' which keeps the daily document view statistics working when the pages
+    ''' are served by nginx. configuration key ``doc-view-pixel``, default True.
+    ''' </summary>
+    Public ReadOnly Property DocViewPixelEnabled As Boolean
+
+    ''' <summary>
     ''' the validity window in minutes of the email verification link of a new
     ''' registration. configuration key ``verify-ttl-minutes``, default 30.
     ''' </summary>
@@ -236,6 +284,8 @@ Public Class NugetConfiguration
     Public Const DefaultZipMaxTotalMB As Double = 512
     Public Const DefaultZipMaxEntries As Integer = 2048
     Public Const DefaultApiDocWorkerTimeoutSeconds As Integer = 120
+    Public Const DefaultApiDocWorkerReconcileSeconds As Integer = 300
+    Public Const DefaultApiDocWorkerMaxAttempts As Integer = 3
     Public Const DefaultVerifyTtlMinutes As Integer = 30
 
     Public Const DefaultRegisterEmailLimit As Integer = 3
@@ -252,7 +302,12 @@ Public Class NugetConfiguration
                     dbMergeIdleSeconds As Integer, dbMergeOperations As Integer, dbCheckpointSeconds As Integer,
                     registrationEnabled As Boolean, maxUploadMB As Double,
                     zipMaxEntryMB As Double, zipMaxTotalMB As Double, zipMaxEntries As Integer,
-                    apiDocWorkerTimeoutSeconds As Integer, verifyTtlMinutes As Integer,
+                    apiDocWorkerTimeoutSeconds As Integer,
+                    apiDocWorkerEnabled As Boolean, apiDocWorkerPath As String,
+                    apiDocWorkerReconcileSeconds As Integer, apiDocWorkerMaxAttempts As Integer,
+                    apiDocWorkerFallbackSync As Boolean, docsStaticDirectory As String,
+                    docViewPixelEnabled As Boolean,
+                    verifyTtlMinutes As Integer,
                     registerEmailLimit As Integer, registerIpLimit As Integer,
                     resetEmailLimit As Integer, resetIpLimit As Integer, rateWindowSeconds As Integer)
 
@@ -281,6 +336,13 @@ Public Class NugetConfiguration
         Me.ZipMaxTotalMB = zipMaxTotalMB
         Me.ZipMaxEntries = zipMaxEntries
         Me.ApiDocWorkerTimeoutSeconds = apiDocWorkerTimeoutSeconds
+        Me.ApiDocWorkerEnabled = apiDocWorkerEnabled
+        Me.ApiDocWorkerPath = apiDocWorkerPath
+        Me.ApiDocWorkerReconcileSeconds = apiDocWorkerReconcileSeconds
+        Me.ApiDocWorkerMaxAttempts = apiDocWorkerMaxAttempts
+        Me.ApiDocWorkerFallbackSync = apiDocWorkerFallbackSync
+        Me.DocsStaticDirectory = docsStaticDirectory
+        Me.DocViewPixelEnabled = docViewPixelEnabled
         Me.VerifyTtlMinutes = verifyTtlMinutes
         Me.RegisterEmailLimit = registerEmailLimit
         Me.RegisterIpLimit = registerIpLimit
@@ -376,6 +438,21 @@ Public Class NugetConfiguration
             End If
         End If
 
+        ' the generated document pages live below the web root by default so
+        ' that both nginx and the static file listener of the server can serve
+        ' them without any additional route.
+        Dim docsStatic As String = getValue(config, "docs-static-output")
+
+        If String.IsNullOrEmpty(docsStatic) Then
+            If Not String.IsNullOrEmpty(wwwroot) Then
+                docsStatic = Path.Combine(Path.GetFullPath(wwwroot), "docs")
+            Else
+                docsStatic = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "docs")
+            End If
+        Else
+            docsStatic = Path.GetFullPath(docsStatic)
+        End If
+
         Return New NugetConfiguration(
             data, packages, database, wwwroot, template, baseUrl, tmp,
             boolValue(config, "sitemap-enabled", True),
@@ -396,6 +473,13 @@ Public Class NugetConfiguration
             doubleValue(config, "zip-max-total-mb", DefaultZipMaxTotalMB, 1, 16384),
             intValue(config, "zip-max-entries", DefaultZipMaxEntries, 8, 65536),
             intValue(config, "apidoc-timeout-seconds", DefaultApiDocWorkerTimeoutSeconds, 10, 3600),
+            boolValue(config, "apidoc-worker-enabled", True),
+            getValue(config, "apidoc-worker-path"),
+            intValue(config, "apidoc-worker-reconcile-seconds", DefaultApiDocWorkerReconcileSeconds, 30, 86400),
+            intValue(config, "apidoc-worker-max-attempts", DefaultApiDocWorkerMaxAttempts, 1, 10),
+            boolValue(config, "apidoc-worker-fallback-sync", True),
+            docsStatic,
+            boolValue(config, "doc-view-pixel", True),
             intValue(config, "verify-ttl-minutes", DefaultVerifyTtlMinutes, 5, 1440),
             intValue(config, "register-email-limit", DefaultRegisterEmailLimit, 1, 1000),
             intValue(config, "register-ip-limit", DefaultRegisterIpLimit, 1, 10000),

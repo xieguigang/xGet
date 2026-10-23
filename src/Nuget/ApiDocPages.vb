@@ -48,7 +48,18 @@ Public Module ApiDocPages
     ''' <param name="config"></param>
     ''' <returns></returns>
     Public Function RenderGlobalIndex(store As NugetStore, config As NugetConfiguration) As String
-        Dim records As List(Of PackageApiDocRecord) = store.ReadApiDocIndex()
+        Return RenderGlobalIndex(store.ReadApiDocIndex(), config)
+    End Function
+
+    ''' <summary>
+    ''' render the global index page from the given type index rows. The overload
+    ''' does not touch the database, so that the api document daemon can reuse
+    ''' the very same renderer as the server side fall back.
+    ''' </summary>
+    ''' <param name="records"></param>
+    ''' <param name="config"></param>
+    ''' <returns></returns>
+    Public Function RenderGlobalIndex(records As IEnumerable(Of PackageApiDocRecord), config As NugetConfiguration) As String
         Dim document As ApiDocDocument = BuildGlobalDocument(records)
 
         Call DocUrls.ApplyNugetScheme(document)
@@ -79,20 +90,33 @@ Public Module ApiDocPages
 
         Dim records As List(Of PackageApiDocRecord) = store.ReadPackageApiDocs(packageId, resolvedVersion)
 
-        If records.Count = 0 Then
+        Return RenderPackageIndex(records, packageId, resolvedVersion,
+                                  store.GetPackageApiDocVersions(packageId), config)
+    End Function
+
+    ''' <summary>
+    ''' render the per package api document index page from the given document
+    ''' rows. Nothing is returned when there is no document row at all.
+    ''' </summary>
+    ''' <param name="records">the document rows of exactly this package version.</param>
+    ''' <param name="packageId"></param>
+    ''' <param name="version"></param>
+    ''' <param name="versions">every version of the package which has documents, for the version selector.</param>
+    ''' <param name="config"></param>
+    ''' <returns></returns>
+    Public Function RenderPackageIndex(records As IList(Of PackageApiDocRecord), packageId As String,
+                                       version As String, versions As IEnumerable(Of String),
+                                       config As NugetConfiguration) As String
+
+        If records Is Nothing OrElse records.Count = 0 Then
             Return Nothing
         End If
 
-        Dim document As ApiDocDocument = BuildPackageDocument(records, packageId, resolvedVersion)
+        Dim document As ApiDocDocument = BuildPackageDocument(records, packageId, version)
 
         Call DocUrls.ApplyNugetScheme(document)
 
-        Dim ctx As DocSiteContext = context(document)
-        Dim model As DocPageModel = ApiDocRenderer.PackageIndexPage(
-            ctx, "", GlobalIndexUrl(), PackageIndexUrl(packageId, resolvedVersion),
-            versionSelect(store, packageId, resolvedVersion))
-
-        Return renderTemplate(config, PackageIndexTemplate, model)
+        Return RenderPackageIndexFromDocument(document, packageId, version, versions, config)
     End Function
 
     ''' <summary>
@@ -116,13 +140,30 @@ Public Module ApiDocPages
 
         Dim records As List(Of PackageApiDocRecord) = store.ReadPackageApiDocs(packageId, resolvedVersion)
 
-        If records.Count = 0 Then
+        Return RenderTypePage(records, packageId, resolvedVersion, typeFullName,
+                              store.GetPackageApiDocVersions(packageId), config)
+    End Function
+
+    ''' <summary>
+    ''' render the content page of one type from the given document rows.
+    ''' </summary>
+    ''' <param name="records">the document rows of exactly this package version.</param>
+    ''' <param name="packageId"></param>
+    ''' <param name="version"></param>
+    ''' <param name="typeFullName"></param>
+    ''' <param name="versions"></param>
+    ''' <param name="config"></param>
+    ''' <returns></returns>
+    Public Function RenderTypePage(records As IList(Of PackageApiDocRecord), packageId As String,
+                                   version As String, typeFullName As String,
+                                   versions As IEnumerable(Of String), config As NugetConfiguration) As String
+
+        If records Is Nothing OrElse records.Count = 0 OrElse String.IsNullOrEmpty(typeFullName) Then
             Return Nothing
         End If
 
-        Dim document As ApiDocDocument = BuildPackageDocument(records, packageId, resolvedVersion)
-        Dim t As ApiDocType = document.types _
-            .FirstOrDefault(Function(item) String.Equals(item.fullName, typeFullName, StringComparison.OrdinalIgnoreCase))
+        Dim document As ApiDocDocument = BuildPackageDocument(records, packageId, version)
+        Dim t As ApiDocType = findType(document, typeFullName)
 
         If t Is Nothing Then
             Return Nothing
@@ -130,11 +171,67 @@ Public Module ApiDocPages
 
         Call DocUrls.ApplyNugetScheme(document)
 
+        Return RenderTypePageFromDocument(document, t, packageId, version, config)
+    End Function
+
+    ''' <summary>
+    ''' render one type page from an already built (and url scheme applied)
+    ''' document. The daemon builds the document exactly once per package
+    ''' version and then renders every type page through this overload, so that
+    ''' a package with many types does not rebuild the model for every page.
+    ''' </summary>
+    ''' <param name="document"></param>
+    ''' <param name="t"></param>
+    ''' <param name="packageId"></param>
+    ''' <param name="version"></param>
+    ''' <param name="config"></param>
+    ''' <returns></returns>
+    Public Function RenderTypePageFromDocument(document As ApiDocDocument, t As ApiDocType,
+                                               packageId As String, version As String,
+                                               config As NugetConfiguration) As String
+
+        If document Is Nothing OrElse t Is Nothing Then
+            Return Nothing
+        End If
+
         Dim ctx As DocSiteContext = context(document)
         Dim model As DocPageModel = ApiDocRenderer.TypePage(
-            ctx, t, "", GlobalIndexUrl(), PackageIndexUrl(packageId, resolvedVersion))
+            ctx, t, "", GlobalIndexUrl(), PackageIndexUrl(packageId, version))
+
+        model("doc_pixel") = docPixel(config, packageId, version)
 
         Return renderTemplate(config, TypeTemplate, model)
+    End Function
+
+    ''' <summary>
+    ''' render the per package index page from an already built (and url scheme
+    ''' applied) document.
+    ''' </summary>
+    Public Function RenderPackageIndexFromDocument(document As ApiDocDocument, packageId As String,
+                                                   version As String, versions As IEnumerable(Of String),
+                                                   config As NugetConfiguration) As String
+
+        If document Is Nothing OrElse document.types Is Nothing OrElse document.types.Count = 0 Then
+            Return Nothing
+        End If
+
+        Dim ctx As DocSiteContext = context(document)
+        Dim model As DocPageModel = ApiDocRenderer.PackageIndexPage(
+            ctx, "", GlobalIndexUrl(), PackageIndexUrl(packageId, version),
+            versionSelect(packageId, versions, version))
+
+        model("doc_pixel") = docPixel(config, packageId, version)
+
+        Return renderTemplate(config, PackageIndexTemplate, model)
+    End Function
+
+    Private Function findType(document As ApiDocDocument, typeFullName As String) As ApiDocType
+        If document?.types Is Nothing Then
+            Return Nothing
+        End If
+
+        Return document.types.FirstOrDefault(
+            Function(item) String.Equals(item.fullName, typeFullName, StringComparison.OrdinalIgnoreCase))
     End Function
 
     ''' <summary>
@@ -303,9 +400,24 @@ Public Module ApiDocPages
     End Function
 
     Private Function versionSelect(store As NugetStore, packageId As String, selected As String) As String
-        Dim versions As List(Of String) = store.GetPackageApiDocVersions(packageId)
+        Return versionSelect(packageId, store.GetPackageApiDocVersions(packageId), selected)
+    End Function
 
-        If versions.Count <= 1 Then
+    ''' <summary>
+    ''' build the ``&lt;select&gt;`` html of the document version switcher from the
+    ''' given version list, so that the api document daemon does not need a
+    ''' database round trip for every page.
+    ''' </summary>
+    ''' <param name="packageId"></param>
+    ''' <param name="versions"></param>
+    ''' <param name="selected"></param>
+    ''' <returns></returns>
+    Private Function versionSelect(packageId As String, versions As IEnumerable(Of String), selected As String) As String
+        Dim list As List(Of String) = If(versions, Enumerable.Empty(Of String)()) _
+            .Where(Function(v) Not String.IsNullOrEmpty(v)) _
+            .ToList()
+
+        If list.Count <= 1 Then
             Return ""
         End If
 
@@ -313,7 +425,7 @@ Public Module ApiDocPages
 
         sb.Append("<select id=""doc-version"" class=""doc-version"" aria-label=""document version"" onchange=""if(this.value){location.href=this.value;}"">")
 
-        For Each v As String In versions
+        For Each v As String In list
             Dim url$ = PackageIndexUrl(packageId, v)
             Dim onAttr$ = If(String.Equals(v, selected, StringComparison.OrdinalIgnoreCase), " selected=""selected""", "")
 
@@ -355,7 +467,61 @@ Public Module ApiDocPages
             template = fallbackTemplate()
         End If
 
-        Return DocTemplate.Render(template, model.values)
+        Dim html As String = DocTemplate.Render(template, model.values)
+
+        Return injectPixel(html, model("doc_pixel"))
+    End Function
+
+    ''' <summary>
+    ''' the html of the 1x1 view counter pixel of one package document page. the
+    ''' page is served by nginx as a plain static file, so the daily document view
+    ''' statistic is collected by this tiny request instead of the page request.
+    ''' </summary>
+    ''' <param name="config"></param>
+    ''' <param name="packageId"></param>
+    ''' <param name="version"></param>
+    ''' <returns></returns>
+    Private Function docPixel(config As NugetConfiguration, packageId As String, version As String) As String
+        If config Is Nothing OrElse Not config.DocViewPixelEnabled Then
+            Return ""
+        End If
+
+        If String.IsNullOrEmpty(packageId) Then
+            Return ""
+        End If
+
+        Dim src As String = "/api/doc-view/" & Uri.EscapeDataString(packageId) &
+            "/" & Uri.EscapeDataString(If(version, ""))
+
+        Return "<img class=""doc-view-pixel"" src=""" & DocHtml.Attr(src) & """" &
+            " width=""1"" height=""1"" alt="""" aria-hidden=""true"" referrerpolicy=""no-referrer""" &
+            " style=""position:absolute;left:-9999px;top:0;width:1px;height:1px;opacity:0"" />"
+    End Function
+
+    ''' <summary>
+    ''' make sure that a page which was composed from a user supplied template also
+    ''' carries the counter pixel: the shipped templates declare the
+    ''' ``{{doc_pixel}}`` placeholder, a custom template may not.
+    ''' </summary>
+    ''' <param name="html"></param>
+    ''' <param name="pixel"></param>
+    ''' <returns></returns>
+    Private Function injectPixel(html As String, pixel As String) As String
+        If String.IsNullOrEmpty(html) OrElse String.IsNullOrEmpty(pixel) Then
+            Return html
+        End If
+
+        If html.IndexOf("/api/doc-view/", StringComparison.OrdinalIgnoreCase) >= 0 Then
+            Return html
+        End If
+
+        Dim index As Integer = html.LastIndexOf("</body>", StringComparison.OrdinalIgnoreCase)
+
+        If index < 0 Then
+            Return html & pixel
+        End If
+
+        Return html.Substring(0, index) & pixel & html.Substring(index)
     End Function
 
     ''' <summary>
@@ -373,7 +539,7 @@ Public Module ApiDocPages
             "<aside class=""doc-side"">{{sidebar}}</aside>" & vbLf &
             "<main class=""doc-main""><div class=""wrap doc-wrap"">" & vbLf &
             "<p class=""eyebrow"">{{breadcrumb}}</p>{{content}}" & vbLf &
-            "</div></main></div>" & vbLf &
+            "</div></main></div>{{doc_pixel}}" & vbLf &
             "<script src=""{{base}}/assets/js/docs.js""></script></body></html>"
     End Function
 End Module
