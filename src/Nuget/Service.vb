@@ -11,6 +11,7 @@ Imports Flute.Http.Core.Message
 Imports Flute.Http.Core.Message.HttpHeader
 Imports Microsoft.VisualBasic.Net.Http
 Imports Microsoft.VisualBasic.Net.Protocols.ContentTypes
+Imports Readership
 
 ''' <summary>
 ''' the experimental nuget server controller.
@@ -56,6 +57,12 @@ Public Class Service
     ''' the response helpers report the request activity to it.
     ''' </summary>
     Private sitemap As SitemapScheduler
+
+    ''' <summary>
+    ''' the handle of the independent api document daemon; nothing when the daemon
+    ''' is disabled or its executable is not deployed next to the server.
+    ''' </summary>
+    Private docWorker As ApiDocWorkerClient
 
     ''' <summary>
     ''' the cache life time of the static resources of the ``wwwroot`` folder:
@@ -120,6 +127,51 @@ Public Class Service
         ' already report its activity.
         Me.sitemap = New SitemapScheduler(Me.config, Me.store)
         Call Me.sitemap.Start()
+
+        Call startApiDocWorker()
+    End Sub
+
+    ''' <summary>
+    ''' start the independent api document daemon: every upload is then indexed by
+    ''' that process (extraction, database write and static html rendering), so
+    ''' the request threads of the server stay free. When the daemon is disabled
+    ''' or its executable is not deployed the upload falls back to the in-process
+    ''' extraction.
+    ''' </summary>
+    Private Sub startApiDocWorker()
+        If Not Me.config.ApiDocWorkerEnabled Then
+            Call "the api document daemon is disabled by the configuration".info()
+            Return
+        End If
+
+        Try
+            Me.docWorker = New ApiDocWorkerClient(Me.config)
+            Me.docWorker.OnCompleted = AddressOf onDocJobCompleted
+
+            If Not Me.docWorker.Start() Then
+                Call "the api document daemon is not available, the documents are extracted inside the server process".warning()
+                Me.docWorker = Nothing
+            End If
+        Catch ex As Exception
+            Call $"the api document daemon could not be started: {ex.Message}".warning()
+            Call App.LogException(ex)
+            Me.docWorker = Nothing
+        End Try
+    End Sub
+
+    ''' <summary>
+    ''' the callback of the api document daemon: refresh the site map (and log the
+    ''' outcome) when a package was indexed.
+    ''' </summary>
+    ''' <param name="response"></param>
+    Private Sub onDocJobCompleted(response As ApiDocWorkerResponse)
+        If response Is Nothing Then
+            Return
+        End If
+
+        If sitemap IsNot Nothing Then
+            Call sitemap.NotifyDocsChanged()
+        End If
     End Sub
 
     ''' <summary>
@@ -931,7 +983,7 @@ Public Class Service
             Call registerStaticFiles(pkg)
             Call indexPackage(pkg, metadata)
             Call refreshStatistics()
-            Call indexApiDocs(pkg)
+            Call enqueueApiDocs(pkg)
 
             Call writeResult(res, True, $"published {pkg.package_id} {pkg.version}", New Dictionary(Of String, Object) From {
                 {"id", pkg.package_id},
@@ -2091,6 +2143,58 @@ Public Class Service
     End Sub
 
     ''' <summary>
+    ''' the 1x1 view counter pixel of the static api document pages. nginx serves
+    ''' the pages themselves, so this tiny request is the only thing the server
+    ''' still sees of a document page view: it only increments the daily counter
+    ''' of the package and answers a constant transparent gif.
+    ''' </summary>
+    <HttpGet("/api/doc-view/{id}")>
+    Public Sub DocViewPixel(req As HttpRequest, res As HttpResponse)
+        Call writeDocViewPixel(res, routeValue(req, "id"))
+    End Sub
+
+    ''' <summary>
+    ''' the 1x1 view counter pixel of one document page of a package version.
+    ''' </summary>
+    <HttpGet("/api/doc-view/{id}/{version}")>
+    Public Sub DocViewPixelVersion(req As HttpRequest, res As HttpResponse)
+        Call writeDocViewPixel(res, routeValue(req, "id"))
+    End Sub
+
+    ''' <summary>
+    ''' a transparent 1x1 gif, the smallest possible response body.
+    ''' </summary>
+    Private Shared ReadOnly DocViewPixelGif As Byte() =
+        Convert.FromBase64String("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7")
+
+    ''' <summary>
+    ''' count one document page view of the given package and answer the counter
+    ''' pixel. a hidden package is answered as well, but not counted.
+    ''' </summary>
+    ''' <param name="res"></param>
+    ''' <param name="packageId"></param>
+    Private Sub writeDocViewPixel(res As HttpResponse, packageId As String)
+        If Not String.IsNullOrEmpty(packageId) Then
+            Try
+                If Not store.IsPackageHidden(packageId) Then
+                    Call store.RecordDocView(packageId)
+                End If
+            Catch ex As Exception
+                ' a lost view is irrelevant, it must never break the page
+                Call $"the document view of '{packageId}' could not be recorded: {ex.Message}".debug()
+            End Try
+        End If
+
+        res.AccessControlAllowOrigin = "*"
+        res.AddCustomHttpHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        res.AddCustomHttpHeader("Pragma", "no-cache")
+        res.AddCustomHttpHeader("Expires", "0")
+
+        res.WriteHeader("image/gif", DocViewPixelGif.Length)
+        Call res.SendData(DocViewPixelGif)
+    End Sub
+
+    ''' <summary>
     ''' the per package api document index page (``.../index.html``) and the type
     ''' content page (``.../&lt;type full name&gt;.html``).
     ''' </summary>
@@ -2267,6 +2371,41 @@ Public Class Service
         End If
 
         Call store.ReplacePackageMetadata(pkg.package_id, pkg.version, values)
+    End Sub
+
+    ''' <summary>
+    ''' hand the api document generation of a freshly published package over to
+    ''' the daemon and return immediately. The extraction of the xml comment
+    ''' documents, the database write and the static html rendering all happen in
+    ''' the worker process, so the upload request never pays for the cpu heavy
+    ''' work; only when the daemon is not available the request falls back to the
+    ''' in-process extraction (which is what the server did before).
+    ''' </summary>
+    ''' <param name="pkg">the published package version.</param>
+    Private Sub enqueueApiDocs(pkg As PackageRecord)
+        ' the package itself is already in the feed, so the site map is stale
+        ' from this point on, even when the document generation fails below.
+        If sitemap IsNot Nothing Then
+            Call sitemap.NotifyDocsChanged()
+        End If
+
+        If Me.docWorker IsNot Nothing Then
+            Try
+                If Me.docWorker.EnqueueIndex(pkg.package_id, pkg.version, nupkgFilePath(pkg)) Then
+                    Call $"[apidoc-worker] queued: {pkg.package_id} {pkg.version}".debug()
+                    Return
+                End If
+            Catch ex As Exception
+                Call $"the api document job of {pkg.package_id} {pkg.version} could not be queued: {ex.Message}".warning()
+            End Try
+        End If
+
+        If Not Me.config.ApiDocWorkerFallbackSync Then
+            Call $"the api documents of {pkg.package_id} {pkg.version} were not generated: no daemon and the synchronous fallback is disabled".warning()
+            Return
+        End If
+
+        Call indexApiDocs(pkg)
     End Sub
 
     ''' <summary>

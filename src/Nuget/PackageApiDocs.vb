@@ -47,14 +47,14 @@ Public Module PackageApiDocs
         Dim document As ApiDocDocument = runWorker(nupkgPath, workerTimeoutSeconds, warnings)
 
         If document Is Nothing Then
-            document = extractInProcess(nupkgPath, warnings)
+            document = ExtractInProcess(nupkgPath, warnings)
         End If
 
         If document Is Nothing Then
             Return result
         End If
 
-        result = toRecords(document, packageId, version)
+        result = ToRecords(document, packageId, version)
 
         Return result
     End Function
@@ -95,8 +95,20 @@ Public Module PackageApiDocs
                     Return Nothing
                 End If
 
-                ' drain the pipes after the wait: the worker only writes to
-                ' stderr on a usage error, so a pipe deadlock is not expected.
+                ' the worker writes its log lines to the stderr, so the stream
+                ' has to be drained while the process runs: otherwise a chatty
+                ' extraction could fill the pipe buffer and dead lock the child.
+                Dim stderr As New Text.StringBuilder
+
+                AddHandler process.ErrorDataReceived,
+                    Sub(sender, e)
+                        If e.Data IsNot Nothing Then
+                            Call stderr.AppendLine(e.Data)
+                        End If
+                    End Sub
+
+                Call process.BeginErrorReadLine()
+
                 If Not process.WaitForExit(timeoutSeconds * 1000) Then
                     Try
                         Call process.Kill(entireProcessTree:=True)
@@ -108,7 +120,11 @@ Public Module PackageApiDocs
                     Return Nothing
                 End If
 
-                Dim [error] As String = process.StandardError.ReadToEnd()
+                ' make sure the asynchronous stderr handler has drained the last
+                ' lines of the process before the buffer is read
+                Call process.WaitForExit()
+
+                Dim [error] As String = stderr.ToString()
 
                 If process.ExitCode <> 0 OrElse Not File.Exists(outputFile) Then
                     Call addWarning(warnings, $"the ApiDocWorker process failed (exit code {process.ExitCode}): " &
@@ -150,10 +166,18 @@ Public Module PackageApiDocs
     End Function
 
     ''' <summary>
-    ''' the in-process fallback: unpack the package ``lib`` folder and extract
-    ''' the document model through the metadata-only reflection supplement.
+    ''' the in-process extraction: unpack the package ``lib`` folder and extract
+    ''' the document model through the metadata-only reflection supplement. It is
+    ''' used by the server fall back and by the api document daemon itself (the
+    ''' daemon must not spawn yet another worker process).
+    ''' 
+    ''' an empty document is returned for a package which ships no xml comment
+    ''' document at all, while <c>Nothing</c> means that the extraction failed.
     ''' </summary>
-    Private Function extractInProcess(nupkgPath As String, warnings As List(Of String)) As ApiDocDocument
+    ''' <param name="nupkgPath"></param>
+    ''' <param name="warnings"></param>
+    ''' <returns></returns>
+    Public Function ExtractInProcess(nupkgPath As String, warnings As List(Of String)) As ApiDocDocument
         Dim temp As String = Path.Combine(Path.GetTempPath(), "xdoc-apidoc-" & Guid.NewGuid().ToString("N"))
 
         Try
@@ -163,7 +187,7 @@ Public Module PackageApiDocs
 
             If xmlCount = 0 Then
                 ' a package without any xml comment document is totally normal
-                Return Nothing
+                Return ApiDocDocument.Empty()
             End If
 
             Dim extracted As ApiDocExtractResult = ApiDoc.Extract(New ApiDocOptions With {
@@ -197,7 +221,7 @@ Public Module PackageApiDocs
     ''' <param name="packageId"></param>
     ''' <param name="version"></param>
     ''' <returns></returns>
-    Private Function toRecords(document As ApiDocDocument, packageId As String, version As String) As List(Of PackageApiDocRecord)
+    Public Function ToRecords(document As ApiDocDocument, packageId As String, version As String) As List(Of PackageApiDocRecord)
         Dim result As New List(Of PackageApiDocRecord)
         Dim namespaceSummaries As New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase)
 
