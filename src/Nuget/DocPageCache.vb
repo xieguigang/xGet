@@ -200,8 +200,10 @@ Public Module DocPageCache
         End If
 
         If name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 Then
-            Call $"the type full name '{typeFullName}' contains a character which is not valid in a file name, " &
-                 "its page is not cached as a static page".warning()
+            Dim message As String = $"the type full name '{typeFullName}' contains a character which is " &
+                "not valid in a file name, its page is not cached as a static page"
+
+            Call message.warning()
             Return Nothing
         End If
 
@@ -298,9 +300,9 @@ Public Module DocPageCache
     Public Function WriteGlobalIndex(config As NugetConfiguration,
                                      records As IEnumerable(Of PackageApiDocRecord)) As Boolean
 
-        Dim path As String = GlobalIndexFilePath(config)
+        Dim target As String = GlobalIndexFilePath(config)
 
-        If path Is Nothing Then
+        If target Is Nothing Then
             Return False
         End If
 
@@ -310,8 +312,8 @@ Public Module DocPageCache
             Return False
         End If
 
-        Call Directory.CreateDirectory(Path.GetDirectoryName(path))
-        Call writeAtomic(path, html)
+        Call Directory.CreateDirectory(Path.GetDirectoryName(target))
+        Call writeAtomic(target, html)
 
         Return True
     End Function
