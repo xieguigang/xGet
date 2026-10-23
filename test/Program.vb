@@ -14,6 +14,12 @@ Module Program
                 Case "serverdocs"
                     Environment.ExitCode = ServerDocsTest.Run(args.Skip(1).ToArray)
                     Return
+                Case "staticdocs"
+                    Environment.ExitCode = StaticDocsTest.Run(args.Skip(1).ToArray)
+                    Return
+                Case "seeddocs"
+                    Environment.ExitCode = SeedDocsTest.Run(args.Skip(1).ToArray)
+                    Return
                 Case "walcheck"
                     Environment.ExitCode = WalCheckTest.Run(args.Skip(1).ToArray)
                     Return

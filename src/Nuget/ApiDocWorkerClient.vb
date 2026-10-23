@@ -413,7 +413,14 @@ Public Class ApiDocWorkerClient
                     Exit While
                 End If
 
-                Call $"[apidoc-worker] {line}".debug()
+                ' keep the diagnostics of the worker visible without turning the
+                ' server log into a debug dump
+                If line.IndexOf("warning", StringComparison.OrdinalIgnoreCase) >= 0 OrElse
+                   line.IndexOf("error", StringComparison.OrdinalIgnoreCase) >= 0 Then
+                    Call $"[apidoc-worker] {line}".warning()
+                Else
+                    Call $"[apidoc-worker] {line}".debug()
+                End If
             End While
         Catch
         End Try

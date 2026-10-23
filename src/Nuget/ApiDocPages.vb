@@ -500,8 +500,8 @@ Public Module ApiDocPages
 
     ''' <summary>
     ''' make sure that a page which was composed from a user supplied template also
-    ''' carries the counter pixel: the shipped templates declare the
-    ''' ``{{doc_pixel}}`` placeholder, a custom template may not.
+    ''' carries the counter pixel: the shipped templates declare the ``doc_pixel``
+    ''' placeholder, a custom template may not.
     ''' </summary>
     ''' <param name="html"></param>
     ''' <param name="pixel"></param>
