@@ -22,12 +22,17 @@ g:/xDoc/
 │   │   ├── NugetStatistics.vb      # 标签分布 / 标签关系网络 / 依赖网络统计文档
 │   │   ├── PackageClusterAnalysis.vb # tag 0/1 矩阵 → UMAP 3D → KMeans 聚类
 │   │   ├── NupkgReader.vb          # nupkg 解析（nuspec 元数据、icon、readme、lib 注释文档提取）
-│   │   ├── PackageApiDocs.vb       # 上传时从 nupkg 提取 api 文档并生成入库记录
-│   │   ├── ApiDocPages.vb          # 从数据库重建文档模型 + 读取模板服务端渲染三类文档页
+│   │   ├── PackageApiDocs.vb       # nupkg → 文档行（进程内提取 / 一次性 worker 回退）
+│   │   ├── ApiDocPages.vb          # 从数据库或给定文档行渲染三类文档页（模板外壳）
+│   │   ├── DocPageCache.vb         # [新增] 静态文档页缓存：URL↔文件映射、原子写、陈旧清理、清单与对账
+│   │   ├── ApiDocWorkerClient.vb   # [新增] 守护进程客户端：启动/重启、JSON 行协议、作业去重队列
 │   │   ├── SitemapGenerator.vb     # [新增] 站点地图：收集静态页/包详情页/文档页 url 并原子写出 sitemap.xml
 │   │   ├── SitemapScheduler.vb     # [新增] 站点地图调度：请求活动时钟 + 变更指纹 + 空闲期后台生成
 │   │   ├── TotpAuth.vb             # TOTP 注册与校验（每用户 128 字符盐）
 │   │   └── TotpModule.vb           # RFC 6238 实现（生成/校验/otpauth URI/自检）
+│   ├── ApiDocWorker/               # 文档生成守护进程（服务器启动时拉起）
+│   │   ├── Program.vb              # --daemon 守护模式 / --nupkg --output 一次性模式
+│   │   └── WorkerDaemon.vb         # [新增] 单线程作业队列、提取写库、静态页生成、对账与父进程看护
 │   ├── xGet/                       # 客户端控制台程序
 │   │   ├── Program.vb              # register / upload / batch 子命令
 │   │   ├── NugetApiClient.vb       # HTTP 客户端（注册、multipart 上传）
@@ -46,10 +51,11 @@ g:/xDoc/
 │       ├── CommentMarkdown.vb      # MarkdownRender 封装与 cref 链接路由解析
 │       ├── Html/                   # 首页 / 命名空间页 / 类型页写出器与页面骨架
 │       └── Themes/                 # 默认 scibasic 主题（内嵌资源）与主题解析
-├── test/                           # 命令行自检（TOTP RFC 6238 向量 + API 文档生成校验）
+├── test/                           # 命令行自检（TOTP / apidoc / serverdocs / staticdocs / seeddocs）
 ├── dist/
-│   ├── bin/                        # 编译输出（Nuget.dll、Fluteway、xGet 等）
+│   ├── bin/                        # 编译输出（Nuget.dll、ApiDocWorker、Fluteway、xGet 等）
 │   ├── wwwroot/                    # 前端站点（页面 + assets，含 assets/sitemap.xsl）
+│   │   └── docs/                   # 运行时生成的静态文档页（gitignore，nginx 直接命中）
 │   ├── template/                   # API 文档页模板（docs-index / docs-package / docs-type，可替换）
 │   ├── tmp/                        # 站点地图产物（sitemap.xml + sitemap.state），按 --tmp 生成
 │   ├── run.cmd / run.sh            # 启动脚本
@@ -80,6 +86,9 @@ dotnet run --project test/test.vbproj -- apidoc "./dist/bin" "./dist/docs" sciba
 
 # 服务端文档页自检（提取 → 入库 → 重建 → 模板渲染，不启动 http 服务）
 dotnet run --project test/test.vbproj -- serverdocs
+
+# 静态文档页缓存自检（生成 → 文件树 / URL↔文件映射 / 计数像素 / 陈旧清理 / 幂等）
+dotnet run --project test/test.vbproj -- staticdocs
 
 # JSql WAL 落盘自检（写入 → 空闲 → 确认 WAL 已合并回数据文件）
 dotnet run --project test/test.vbproj -- walcheck [idleSeconds] [waitSeconds]
@@ -154,6 +163,16 @@ sitemap-base-url=            ; 站点地图链接使用的域名；留空则回�
 sitemap-idle-seconds=60      ; 控制器无请求达到该秒数才视为「服务器空闲」
 sitemap-interval-seconds=300 ; 变更/空闲检查的间隔（秒）
 
+; API 文档守护进程（详见第 12 节）
+apidoc-worker-enabled=true
+apidoc-worker-path=            ; 可执行文件路径；留空则取服务器同目录的 ApiDocWorker.exe / .dll
+apidoc-timeout-seconds=120     ; 一次性回退提取时子进程的硬超时（秒）
+apidoc-worker-reconcile-seconds=300 ; 对账/补齐静态页的间隔（秒）
+apidoc-worker-max-attempts=3   ; 单个作业的最大尝试次数
+apidoc-worker-fallback-sync=true ; 守护进程不可用时是否退回进程内同步提取
+docs-static-output=./wwwroot/docs ; 静态文档页输出根目录，默认 wwwroot/docs
+doc-view-pixel=true            ; 静态页是否内嵌 1x1 访问计数像素
+
 ; 周期性聚类分析
 cluster-enabled=true
 cluster-k=6
@@ -220,6 +239,7 @@ xGet batch    --server http://localhost:80 --email me@example.com --dir ./packag
 | GET | `/api/stats` | 总览统计（含 `views` 页面浏览与 `docViews` 文档访问累计）+ Top 下载 + 最近发布 |
 | GET | `/api/tag/{tag}?skip=&take=` | 按 tag 查包 |
 | GET | `/api/icon/{id}` | 包内图标 |
+| GET | `/api/doc-view/{id}`、`/api/doc-view/{id}/{version}` | 静态文档页的 1x1 计数像素（透明 GIF，`no-store`；隐藏包不计） |
 | GET | `/api/readme/{id}`、`/api/readme/{id}/{version}` | README 原文（`text/markdown`） |
 | GET | `/api/activity/package/{id}?days=30` | 该包每日下载量 / 详情页访问量 / 文档访问量（补零连续序列，含 `totalDocViews`） |
 | GET | `/api/activity/feed?days=30` | 全站每日下载量 / 访问量 / 文档访问量（含 `totalDocViews`） |
@@ -228,7 +248,7 @@ xGet batch    --server http://localhost:80 --email me@example.com --dir ./packag
 | GET | `/api/stats/dependency-network` | nuspec 依赖网络 |
 | GET | `/api/stats/clusters` | UMAP + KMeans 聚类文档 |
 
-### API 文档页（服务端渲染，伪静态）
+### API 文档页（静态优先，动态兜底）
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
@@ -236,13 +256,14 @@ xGet batch    --server http://localhost:80 --email me@example.com --dir ./packag
 | GET | `/docs/{id}/{version}/index.html` | 程序包帮助文档索引（含版本切换） |
 | GET | `/docs/{id}/{version}/{type}.html` | 类型内容页（`type` 为 URL 编码的类型 fullname） |
 
-三个页面均由服务端从 `package_api_docs` 表重建文档模型后渲染，返回最终 html（伪静态）；
+线上这些 URL 由 `ApiDocWorker` 守护进程预渲染成 `wwwroot/docs/**` 下的静态文件，nginx（或服务器的静态文件监听）
+直接命中，只有静态文件尚未生成时才回落到控制器动态渲染（详见第 12 节）。
 页面外壳取自 `template/` 目录下的可替换模板（`docs-index.html` / `docs-package.html` /
 `docs-type.html`），样式与脚本取自 `wwwroot/assets/css/docs.css`、`wwwroot/assets/js/docs.js`。
 
-访问量统计：成功渲染**包索引页 / 类型页**时，会对该 nuget 程序包的当日文档访问量 +1
-（记录到 `package_doc_activity` 表，见第 7 节）；全局索引 `/docs`、`/docs/index.html` 不对应具体包，
-不计入；包/版本/类型不存在而返回 404 的请求也不计入。该计数会并入包与全站的每日活动序列，
+访问量统计：静态页末尾内嵌 1x1 像素 `GET /api/doc-view/{id}/{version}`，每命中一次为该包当日
+`package_doc_activity` +1（见第 7 节）；动态兜底路径渲染成功时同样直接计数。全局索引
+`/docs`、`/docs/index.html` 不对应具体包，不计入。该计数会并入包与全站的每日活动序列，
 在 `about.html` 与包详情页的三线图中作为「doc views」曲线展示。
 
 ### 站点地图（伪静态）
@@ -327,10 +348,12 @@ xGet batch    --server http://localhost:80 --email me@example.com --dir ./packag
 依赖库全部本地化于 `assets/vendor/`：`echarts`、`echarts-wordcloud`、`echarts-gl@2.0.9`、`marked@12.0.2`，
 以及保留备用的 `3d-force-graph`、`three.min.js`。样式沿用 scibasic.net 的暗色风格（`assets/css/scibasic.css`）。
 
-API 文档页（`/docs/...`）由服务端渲染，不属于静态页面；静态页面的顶部导航通过相对链接
-`docs/index.html` 指向全局文档索引。文档页的 html 模板放在 `dist/template/`，
+API 文档页（`/docs/...`）由 `ApiDocWorker` 守护进程预渲染成静态 html，落在 `dist/wwwroot/docs/`，
+线上由 nginx 直接命中（详见第 12 节）；服务器端的同名路由只作为静态文件缺失时的兜底。
+静态页面的顶部导航通过相对链接 `docs/index.html` 指向全局文档索引。文档页的 html 模板放在 `dist/template/`，
 样式与交互放在 `dist/wwwroot/assets/css/docs.css` 与 `dist/wwwroot/assets/js/docs.js`
-（`docs.js` 提供命名空间树筛选、侧栏折叠与锚点平滑跳转），两者都可以直接替换而无需重新编译。
+（`docs.js` 提供命名空间树筛选、侧栏折叠与锚点平滑跳转），两者都可以直接替换而无需重新编译；
+模板改动后重新触发一次文档生成即可（`test seeddocs` + 重启，或重新上传对应包）。
 
 五个静态页面（`index` / `package` / `about` / `graph` / `tags`）都在 `<head>` 中以
 `<link rel="sitemap" type="application/xml" href="sitemap.xml">` 声明站点地图，并在页脚 legal 行
@@ -340,10 +363,15 @@ API 文档页（`/docs/...`）由服务端渲染，不属于静态页面；静�
 
 ## 10. 已知限制
 
-- JSql 面向小数据量：每次查询整表读入、每次写入整表写回，非线程安全（已在数据层加锁）。
+- JSql 面向小数据量：每次查询整表读入、每次写入整表写回，非线程安全（已在数据层加锁）；
+  服务器与 `ApiDocWorker` 通过 `MultiProcessAccess` 交替访问，任一时刻仍只有一个写者。
 - UMAP/KMeans 缺少固定随机种子，同一份数据每次重建的绝对坐标与簇编号可能不同。
 - 通过静态直链（`/packages/...`）下载不会计入每日下载量，页面与 NuGet 客户端均走控制器路径。
 - 上传认证为实验性 TOTP 方案，未实现用户管理、权限与审计等能力。
+- 文档静态页由守护进程异步生成，上传成功到页面可访问之间存在一个队列延迟；期间由服务端动态渲染兜底。
+- 被 `hidden` 标记的包，其静态文档页最长会在一个对账周期（默认 300s）后消失（静态文件绕过了控制器的可见性检查）。
+- 类型 fullname 含文件系统非法字符（`< > : " \ | ? *`，只可能出现在 Windows 本地开发）时该类型页不做静态缓存，
+  仅记录 warning 并可回落到动态渲染。
 
 ---
 
@@ -412,33 +440,101 @@ Dim document = extracted.Document
 
 ---
 
-## 12. 随包 API 文档（服务端）
+## 12. 随包 API 文档（守护进程 + 静态页）
 
-上传 nupkg 时（`Service.uploadPackage`）在完成包发布与统计重建后，会 best-effort 提取随包 API 文档：
+上传 nupkg 后，API 文档的**提取、入库与页面渲染都不在请求线程里完成**：`Service.Mount` 在服务器启动时同步拉起常驻的
+`ApiDocWorker` 守护进程（`src/ApiDocWorker`），上传只把「为这个包生成文档」作为一条作业投递到队列就立即返回。
+双核小机器上的 CPU 峰值因此只落在 worker 的单线程队列上，Web 服务器进程只负责收发与极轻量的计数。
+
+### 12.1 进程模型与协议
+
+- 服务器 → worker：stdin，一行一个 JSON `ApiDocWorkerJob`（`id` / `action` / `packageId` / `version` / `nupkg` / `attempt`）；
+- worker → 服务器：stdout，一行一个 JSON `ApiDocWorkerResponse`（`id` / `ok` / `message` / `warnings` / `types` / `pages` / `documents` / `elapsedMs`）；
+- worker 的日志（`.info()/.debug()/.warning()`）全部被重定向到 **stderr**，服务器逐行转发到自己的日志并加 `[apidoc-worker]` 前缀，
+  因此日志永远不会污染协议行；
+- worker 单线程顺序消费队列（同一时刻只有一个渲染任务）；排队中的作业按 `包 id + 版本` 去重，在途作业不参与去重
+  （同名版本重传会再排一次，后一次读到的是最新的 nupkg）；
+- 作业失败按 `apidoc-worker-max-attempts` 内联退避重试（1s、2s…），最终失败只告警，不影响包发布；
+- worker 崩溃/被强杀时服务器指数退避重启（1s→2s→…上限 60s），并把未收到回执的作业重新入队；
+  另有 15s 看门狗兜底重启失败或事件丢失的情况；
+- 服务器退出（stdin 关闭）时 worker 读到 EOF 自行收尾退出，不会留下孤儿进程（另有 `--parent-pid` 看护）。
+
+### 12.2 单个作业做什么
 
 1. `NupkgReader.ExtractLibComments` 选取 `lib/` 下优先级最高的目标框架（`net10.0` > `netstandard2.0` > `net48`），
    把该框架目录下的 `*.xml` 与同名 `*.dll` 解包到临时目录；
 2. `Readership.ApiDoc.Extract` 解析注释（并反射 dll 补全缺失成员）；
-3. `PackageApiDocs` 把每个类型序列化为一行 `PackageApiDocRecord`，`NugetStore.ReplacePackageApiDocs` 写入
-   `package_api_docs` 表（键为包 id + 版本）。
+3. `PackageApiDocs.ToRecords` 把每个类型序列化为一行 `PackageApiDocRecord`，`NugetStore.ReplacePackageApiDocs`
+   写入 `package_api_docs` 表（键为包 id + 版本；JSql 以 `MultiProcessAccess` 多进程模式访问，锁冲突最多等待 15s）；
+4. `DocPageCache.WritePackageVersion` 渲染并落盘：包索引页 + 每个类型一个内容页；
+5. 防抖 5s 后重建跨包全局索引 `docs/index.html`。
 
-任何一步失败都只记录 warning，不影响包发布成功。之后浏览器访问：
+### 12.3 静态页与 nginx
 
-- `/docs/index.html`：跨包全局命名空间 / 类型索引；
-- `/docs/{id}/{version}/index.html`：该包该版本的命名空间 / 类型索引（含版本切换）；
-- `/docs/{id}/{version}/{typeFullName}.html`：类型内容页，按包 id + 版本 + 类型 fullname 从表中读取并渲染。
+- 输出根目录由 `docs-static-output` 决定（默认 `{wwwroot}/docs`），**文件树与 URL 一一对应**：
+  `docs/{id}/{version}/index.html`、`docs/{id}/{version}/{typeFullName}.html`；
+- URL 用 `Uri.EscapeDataString` 转义（与 `DocUrls.NugetTypeUrl` 完全一致），磁盘文件名用**未转义**的
+  id / version / 类型 fullname —— nginx 会先解码 URI 再映射文件系统，生成端与对账端必须共用同一套映射；
+- 每个文件先写 `.tmp` 再 `File.Move(overwrite:=True)` 原子替换；整目录重写后会删除本次未生成的陈旧 html，
+  并写入 `_manifest.json` 记录本次生成的类型清单，供对账快速判定「完整 / 缺失」；
+- nginx 以 `dist/wwwroot` 为 docroot 时无需额外配置即可命中静态页；建议显式声明缓存：
 
-三类页面都在服务端渲染后返回完整 html（伪静态），页面外壳来自可替换模板
-`dist/template/docs-index.html`、`docs-package.html`、`docs-type.html`；模板缺失时回退内置最小模板并记录警告。
-`package.html` 通过 `/api/package/{id}` 响应中的 `docs` 字段渲染「API Documentation」跳转链接；
-站点所有静态页面的顶部导航（Packages / Statistics / Graphs / **API Docs** / Service Index）都提供了 `/docs/index.html` 入口。
+```nginx
+# 文档静态页：直接由 nginx 返回，不再落到 nuget 服务器
+location /docs/ {
+    root /srv/xdoc/wwwroot;          # 即 --wwwroot 指向的目录
+    try_files $uri =404;
+    expires 7d;
+    add_header Cache-Control "public";
+}
 
-文档页左侧侧栏：由于 nuget 文档没有独立的命名空间页，命名空间树中的节点会跳到
-「文档索引页中该命名空间对应的区块」（`.../index.html#ns-<namespace>`），当前类型的命名空间下还会列出
-可直接跳转的类型叶子节点。
+# 其余请求（含计数像素）反代到 nuget 服务器
+location / {
+    proxy_pass http://127.0.0.1:80;
+    proxy_set_header Host $host;
+}
+```
 
-自检：`dotnet run --project test/test.vbproj -- serverdocs [nupkg] [template]`
-（提取 → 入库 → 重建文档模型 → 渲染三类页面，全程不启动 http 服务）。
+`wwwroot/docs` 是运行时产物，已在 `.gitignore` 中忽略。Fluteway 的静态文件监听也先于路由命中这些文件，
+所以即使不经过 nginx，直接访问服务器同样返回静态页（此时请求不会进入控制器）。
+
+### 12.4 对账与自愈
+
+worker 启动 10s 后做一次对账，之后每 `apidoc-worker-reconcile-seconds`（默认 300s）一次：
+
+- 读一次 `package_api_docs` 索引（不带 payload），按 `包 id + 版本` 汇总类型清单；
+- 静态页缺失、清单不一致或文件丢失 → 排一个 `rebuild` 作业（只从数据库重渲染，不需要 nupkg）；
+- `package_flags` 中标记为 hidden 的包 → 删除其整个静态目录（存在**最长一个对账周期**的可见性窗口）；
+- 数据库中已不存在的版本 → 删除对应静态目录。
+
+因此 `xConsole package hide <id> on` 之类的外部改动无需通知服务器，会在下一个对账周期自动生效。
+
+### 12.5 访问量与兜底
+
+- 静态页由 nginx 直接命中，服务器看不到页面请求，文档访问量改由页面末尾的 1x1 计数像素采集：
+  `GET /api/doc-view/{id}/{version}` → 当日 `package_doc_activity` +1，返回 42 字节透明 GIF，
+  并带 `Cache-Control: no-store, no-cache, must-revalidate`；
+  置 `doc-view-pixel=false` 可关闭（关闭后前端「文档访问量」曲线不再增长）；
+- 服务器端 `/docs`、`/docs/index.html`、`/docs/{id}/{version}/{name}.html` 保留为**冷路径兜底**：
+  上传后到 worker 完成之间静态文件尚不存在，仍能动态渲染，避免 404；静态文件存在时静态监听优先命中；
+- `package.html` 通过 `/api/package/{id}` 响应中的 `docs` 字段渲染「API Documentation」跳转链接；
+  站点所有静态页面的顶部导航（Packages / Statistics / Graphs / **API Docs** / Service Index）都提供 `/docs/index.html` 入口。
+
+文档页侧栏：nuget 文档没有独立的命名空间页，命名空间树节点跳到「索引页中该命名空间对应的区块」
+（`.../index.html#ns-<namespace>`），当前命名空间下还会列出可直接跳转的类型叶子节点。
+
+### 12.6 自检
+
+```bash
+# 服务端渲染回归（提取 → 入库 → 模板渲染三类页面，不启动 http）
+dotnet run --project test/test.vbproj -- serverdocs [nupkg] [template]
+
+# 静态页缓存自检（生成 → 校验文件树 / URL↔文件映射 / 计数像素 / 陈旧页清理 / 幂等）
+dotnet run --project test/test.vbproj -- staticdocs [nupkg] [template] [output]
+
+# 把某个包的文档行写入本地数据库（需先停止服务器），再启动服务器即可观察守护进程补齐静态页
+dotnet run --project test/test.vbproj -- seeddocs [nupkg] [data-dir]
+```
 
 ---
 

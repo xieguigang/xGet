@@ -52,6 +52,12 @@ Public Class ApiDocWorkerClient
     Private restartScheduled As Boolean
     Private restartDelaySeconds As Integer = 1
 
+    ''' <summary>serializes <see cref="Start"/> so that two restart paths can not spawn two workers.</summary>
+    Private ReadOnly startGate As New Object
+
+    ''' <summary>the watchdog which restarts a worker whose exit event was missed.</summary>
+    Private watchdog As Threading.Timer
+
     ''' <summary>
     ''' invoked on the reader thread for every answered job. the server uses it
     ''' to refresh the site map and to log the outcome.
@@ -101,46 +107,95 @@ Public Class ApiDocWorkerClient
     ''' </summary>
     ''' <returns></returns>
     Public Function Start() As Boolean
-        If disposed Then
-            Return False
-        End If
+        SyncLock startGate
+            If disposed Then
+                Return False
+            End If
 
-        Dim psi As ProcessStartInfo = startInfo()
+            If Available Then
+                Return True
+            End If
 
-        If psi Is Nothing Then
-            Return False
-        End If
+            Dim psi As ProcessStartInfo = startInfo()
 
-        Try
-            Me.process = Process.Start(psi)
-        Catch ex As Exception
-            Call $"[apidoc-worker] the worker process could not be started: {ex.Message}".warning()
-            Me.process = Nothing
-            Return False
-        End Try
+            If psi Is Nothing Then
+                Return False
+            End If
 
-        If Me.process Is Nothing Then
-            Call "[apidoc-worker] the worker process could not be started".warning()
-            Return False
-        End If
+            Try
+                Me.process = Process.Start(psi)
+            Catch ex As Exception
+                Call $"[apidoc-worker] the worker process could not be started: {ex.Message}".warning()
+                Me.process = Nothing
+                Return False
+            End Try
 
-        Me.running = True
-        Call $"worker process started: {pidText()}".debug()
+            If Me.process Is Nothing Then
+                Call "[apidoc-worker] the worker process could not be started".warning()
+                Return False
+            End If
 
-        AddHandler Me.process.Exited, AddressOf onProcessExited
+            Me.running = True
 
-        Me.reader = NewThread(AddressOf readResponses, "apidoc-worker-out")
-        Me.stderrPump = NewThread(AddressOf pumpErrors, "apidoc-worker-err")
-        Me.writer = NewThread(AddressOf writeJobs, "apidoc-worker-in")
+            ' the exit event of a process which was started after the event
+            ' handler was attached is only raised when the watching is enabled.
+            Me.process.EnableRaisingEvents = True
+            AddHandler Me.process.Exited, AddressOf onProcessExited
 
-        Call Me.reader.Start()
-        Call Me.stderrPump.Start()
-        Call Me.writer.Start()
+            Me.reader = NewThread(AddressOf readResponses, "apidoc-worker-out")
+            Me.stderrPump = NewThread(AddressOf pumpErrors, "apidoc-worker-err")
+            Me.writer = NewThread(AddressOf writeJobs, "apidoc-worker-in")
 
-        Call $"[apidoc-worker] document daemon is running (pid={Me.process.Id})".info()
+            Call Me.reader.Start()
+            Call Me.stderrPump.Start()
+            Call Me.writer.Start()
 
-        Return True
+            ' the watchdog covers the cases which the exit event can not: a
+            ' process which hangs, and a restart attempt which failed itself.
+            If Me.watchdog Is Nothing Then
+                Me.watchdog = New Threading.Timer(AddressOf watchdogTick, Nothing,
+                    dueTime:=TimeSpan.FromSeconds(15),
+                    period:=TimeSpan.FromSeconds(15))
+            End If
+
+            Call $"[apidoc-worker] document daemon is running (pid={Me.process.Id})".info()
+
+            Return True
+        End SyncLock
     End Function
+
+    ''' <summary>
+    ''' the watchdog: start the worker again when it is not running and no restart
+    ''' was scheduled by the exit event.
+    ''' </summary>
+    ''' <param name="state"></param>
+    Private Sub watchdogTick(state As Object)
+        If disposed OrElse Available Then
+            Return
+        End If
+
+        SyncLock restartGate
+            If restartScheduled Then
+                Return
+            End If
+
+            restartScheduled = True
+        End SyncLock
+
+        Call ThreadPool.QueueUserWorkItem(
+            Sub(item)
+                Try
+                    If Not disposed AndAlso Not Available Then
+                        Call "[apidoc-worker] the worker is not running, restarting it".warning()
+                        Call Start()
+                    End If
+                Finally
+                    SyncLock restartGate
+                        restartScheduled = False
+                    End SyncLock
+                End Try
+            End Sub)
+    End Sub
 
     Private Function NewThread(body As ThreadStart, name As String) As Thread
         Return New Thread(body) With {
@@ -514,16 +569,19 @@ Public Class ApiDocWorkerClient
         Call restartMessage.warning()
 
         Call ThreadPool.QueueUserWorkItem(
-            Sub(state)
-                Call Thread.Sleep(TimeSpan.FromSeconds(delay))
+            Sub(item)
+                Try
+                    Call Thread.Sleep(TimeSpan.FromSeconds(delay))
 
-                SyncLock restartGate
-                    Me.restartScheduled = False
-                End SyncLock
-
-                If Not Me.disposed Then
-                    Call Start()
-                End If
+                    If Not Me.disposed Then
+                        Call Start()
+                    End If
+                Finally
+                    ' when the start failed as well, the watchdog retries later
+                    SyncLock restartGate
+                        Me.restartScheduled = False
+                    End SyncLock
+                End Try
             End Sub)
     End Sub
 

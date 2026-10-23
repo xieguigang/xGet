@@ -273,6 +273,7 @@ about-trend.png
 /dist/tmp/e2e-data/db/nuget
 /dist/tmp/sitemap.xml
 /dist/tmp/sitemap.state
+/dist/wwwroot/docs/
 dist/nuget_server.err
 dist/lsp_server.err
 x/nuget/email_blacklist.jsonl
