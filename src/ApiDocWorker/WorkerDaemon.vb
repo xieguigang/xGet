@@ -203,6 +203,10 @@ Public Class WorkerDaemon
                 Exit While
             End If
 
+            ' tolerate a byte order mark which some shells prepend when a text
+            ' line is piped into a native process
+            line = line.TrimStart(ChrW(&HFEFF))
+
             If line.Trim().Length = 0 Then
                 Continue While
             End If

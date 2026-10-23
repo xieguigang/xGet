@@ -47,19 +47,47 @@ Public Module DocReflection
             Return
         End If
 
-        Using context As MetadataLoadContext = createMetadataContext(targets, warnings)
+        ' the reflection warnings are collected apart: an assembly whose
+        ' dependencies are themselves nuget packages produces one warning per
+        ' type, and a package with many types would flood the server log.
+        Dim collected As New List(Of String)
+
+        Using context As MetadataLoadContext = createMetadataContext(targets, collected)
             Dim cache As New Dictionary(Of String, Assembly)(StringComparer.OrdinalIgnoreCase)
 
             For Each assemblyPath As String In targets
-                Dim asm As Assembly = loadAssembly(context, assemblyPath, cache, warnings)
+                Dim asm As Assembly = loadAssembly(context, assemblyPath, cache, collected)
 
                 If asm Is Nothing Then
                     Continue For
                 End If
 
-                Call supplementAssembly(document, asm, assemblyPath, warnings)
+                Call supplementAssembly(document, asm, assemblyPath, collected)
             Next
         End Using
+
+        Call mergeWarnings(warnings, collected)
+    End Sub
+
+    ''' <summary>
+    ''' merge the collected reflection warnings into the caller list, keeping the
+    ''' log short: only the first few warnings are reported, followed by a count
+    ''' of the suppressed ones.
+    ''' </summary>
+    ''' <param name="warnings"></param>
+    ''' <param name="collected"></param>
+    Private Sub mergeWarnings(warnings As List(Of String), collected As List(Of String))
+        Const MaxWarnings As Integer = 3
+
+        If warnings Is Nothing OrElse collected Is Nothing OrElse collected.Count = 0 Then
+            Return
+        End If
+
+        Call warnings.AddRange(collected.Take(MaxWarnings))
+
+        If collected.Count > MaxWarnings Then
+            Call warnings.Add($"reflection: {collected.Count - MaxWarnings} more warning(s) were suppressed")
+        End If
     End Sub
 
     ''' <summary>
@@ -70,7 +98,10 @@ Public Module DocReflection
     ''' this closed set and can never fall back to the application directory.
     ''' </summary>
     Private Function createMetadataContext(assemblyPaths As IEnumerable(Of String), warnings As List(Of String)) As MetadataLoadContext
-        Dim probe As New List(Of String)(StringComparer.OrdinalIgnoreCase)
+        ' note: List(Of String) has no constructor which takes an equality
+        ' comparer; passing one used to throw and silently disable the whole
+        ' reflection supplement. the probe list is de-duplicated below instead.
+        Dim probe As New List(Of String)()
 
         ' the core runtime libraries: they satisfy the well known framework
         ' references (System.Runtime, netstandard, System.Private.CoreLib, ...)
