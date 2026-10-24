@@ -33,6 +33,7 @@ g:/xDoc/
 │   ├── ApiDocWorker/               # 文档生成守护进程（服务器启动时拉起）
 │   │   ├── Program.vb              # --daemon 守护模式 / --nupkg --output 一次性模式
 │   │   └── WorkerDaemon.vb         # [新增] 单线程作业队列、提取写库、静态页生成、对账与父进程看护
+│   ├── xConsole/                   # 管理员命令行（用户 / 黑名单 / 邮件 / 数据库 / 聚类 / 包标记 / 文档重建）
 │   ├── xGet/                       # 客户端控制台程序
 │   │   ├── Program.vb              # register / upload / batch 子命令
 │   │   ├── NugetApiClient.vb       # HTTP 客户端（注册、multipart 上传）
@@ -509,6 +510,18 @@ worker 启动 10s 后做一次对账，之后每 `apidoc-worker-reconcile-second
 
 因此 `xConsole package hide <id> on` 之类的外部改动无需通知服务器，会在下一个对账周期自动生效。
 
+需要**立即**重建（例如替换了 `template/` 模板、或想跳过对账等待）时用管理员命令手动触发，
+它调用的是与守护进程完全相同的 `DocPageCache`，数据库以多进程模式打开，运行中的服务器不受影响：
+
+```bash
+xConsole docs build <package-id> [version] [--reindex] [--wwwroot <dir>] [--template <dir>]
+xConsole docs build --all [--reindex]
+```
+
+- 默认从 `package_api_docs` 的现有行重渲染（`rebuild` 语义，不需要 nupkg）；
+- `--reindex` 则先从 `{packages}/{id}/{version}/{id}.{version}.nupkg` 重新提取 XML 注释并覆盖入库，再渲染；
+- `--wwwroot` / `--template` 默认取 `--data` 的同级目录，与部署布局一致。
+
 ### 12.5 访问量与兜底
 
 - 静态页由 nginx 直接命中，服务器看不到页面请求，文档访问量改由页面末尾的 1x1 计数像素采集：
@@ -534,6 +547,10 @@ dotnet run --project test/test.vbproj -- staticdocs [nupkg] [template] [output]
 
 # 把某个包的文档行写入本地数据库（需先停止服务器），再启动服务器即可观察守护进程补齐静态页
 dotnet run --project test/test.vbproj -- seeddocs [nupkg] [data-dir]
+
+# 管理员手动重建静态文档页（服务器运行中也可执行）
+xConsole docs build <package-id> [version] [--reindex]
+xConsole docs build --all --reindex
 ```
 
 ---

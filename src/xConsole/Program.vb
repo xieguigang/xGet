@@ -56,6 +56,13 @@ Module Program
         "  package owner list <id>         list the owners of one package id" & vbCrLf &
         "  package owner add <id> <email>     associate an account with a package as its owner" & vbCrLf &
         "  package owner remove <id> <email>  remove an account from the owners of a package" & vbCrLf &
+        "  docs build <id> [version]   rebuild the static api document pages of a package" & vbCrLf &
+        "  docs build --all            rebuild every package version which has documents" & vbCrLf &
+        vbCrLf &
+        "docs build options:" & vbCrLf &
+        "  --reindex        re-extract the xml comments from the stored nupkg before the render" & vbCrLf &
+        "  --wwwroot <dir>  the web root (default: the wwwroot folder next to --data)" & vbCrLf &
+        "  --template <dir> the document template folder (default: the template next to --data)" & vbCrLf &
         vbCrLf &
         "mail set options:" & vbCrLf &
         "  --host <host>    the smtp server host (required)" & vbCrLf &
@@ -137,6 +144,8 @@ Module Program
                 Return cluster(options)
             Case "package", "packages", "pkg"
                 Return package(positional, options)
+            Case "docs", "doc", "apidoc"
+                Return docs(positional, options)
             Case Else
                 Call Console.WriteLine($"unknown command: {args(0)}")
                 Call printUsage()
@@ -887,6 +896,268 @@ Module Program
             Return 2
         End If
     End Function
+
+#End Region
+
+#Region "api document cache"
+
+    ''' <summary>
+    ''' the outcome of one static page build of a package version.
+    ''' </summary>
+    Private Enum DocBuildResult
+        ''' <summary>the pages were rendered from the stored document rows.</summary>
+        Built
+        ''' <summary>the version has no document row, its stale pages were removed.</summary>
+        Removed
+        ''' <summary>the build failed, the previous pages are left untouched.</summary>
+        Failed
+    End Enum
+
+    ''' <summary>
+    ''' one package version of the document cache, with the type full names which
+    ''' the database holds for it.
+    ''' </summary>
+    Private Class DocTarget
+        Public Property package_id As String
+        Public Property version As String
+        Public Property types As New List(Of String)
+    End Class
+
+    ''' <summary>
+    ''' rebuild the static api document pages of one package version, of one
+    ''' package (every one of its versions) or of every package which has
+    ''' documents.
+    ''' 
+    ''' the ``ApiDocWorker`` daemon can not be addressed from here: it consumes
+    ''' the stdin of the server process which started it, so this console runs the
+    ''' very same build itself through <see cref="DocPageCache"/>. The database is
+    ''' opened in the multi process mode of this console session, so a running
+    ''' server is not disturbed.
+    ''' </summary>
+    ''' <param name="positional">``build``, the package id and an optional version.</param>
+    ''' <param name="options">``--all``, ``--reindex``, ``--wwwroot``, ``--template``.</param>
+    Private Function docs(positional As List(Of String), options As Dictionary(Of String, String)) As Integer
+        Dim action As String = If(positional.Count > 0, positional(0).ToLowerInvariant(), "build")
+
+        If action <> "build" AndAlso action <> "rebuild" Then
+            Call Console.WriteLine($"unknown docs action: '{action}' (build is expected)")
+            Call printDocsUsage()
+            Return 1
+        End If
+
+        Dim all As Boolean = hasFlag(options, "all", "a")
+        Dim reindex As Boolean = hasFlag(options, "reindex", "re")
+        Dim packageId As String = If(positional.Count > 1, positional(1).Trim(), "")
+        Dim version As String = If(positional.Count > 2, positional(2).Trim(), "")
+
+        If Not all AndAlso String.IsNullOrEmpty(packageId) Then
+            Call printDocsUsage()
+            Return 1
+        End If
+
+        Dim docConfig As NugetConfiguration = docsConfiguration(options)
+        Dim targets As List(Of DocTarget) = docTargets(all, packageId, version)
+
+        Call Console.WriteLine($"document cache : {docConfig.DocsStaticDirectory}")
+        Call Console.WriteLine($"template       : {docConfig.TemplateDirectory}")
+
+        If targets.Count = 0 Then
+            Call Console.WriteLine("no api document was found for the requested package (check the id / version)")
+            Return 2
+        End If
+
+        Dim reindexText As String = If(reindex, ", re-extracting the xml comments", "")
+
+        Call Console.WriteLine($"targets        : {targets.Count} package version(s){reindexText}")
+        Call Console.WriteLine()
+
+        Dim watch As Stopwatch = Stopwatch.StartNew()
+        Dim written As Integer = 0
+        Dim removed As Integer = 0
+        Dim failed As Integer = 0
+
+        For Each target As DocTarget In targets
+            Dim pages As Integer = 0
+            Dim outcome As DocBuildResult = buildDocTarget(docConfig, target, reindex, pages)
+
+            Select Case outcome
+                Case DocBuildResult.Built
+                    written += 1
+                    Call Console.WriteLine($"  {target.package_id} {target.version}: {target.types.Count} type(s) -> {pages} page(s)")
+                Case DocBuildResult.Removed
+                    removed += 1
+                    Call Console.WriteLine($"  {target.package_id} {target.version}: no document row, the stale pages were removed")
+                Case Else
+                    failed += 1
+                    Call Console.WriteLine($"  {target.package_id} {target.version}: FAILED")
+            End Select
+        Next
+
+        Dim globalIndex As Boolean = rebuildGlobalDocIndex(docConfig)
+        watch.Stop()
+
+        Call Console.WriteLine()
+        Call Console.WriteLine($"document cache rebuilt in {watch.ElapsedMilliseconds}ms: " &
+                              $"{written} written, {removed} removed, {failed} failed, global index={globalIndex}")
+
+        Return If(failed = 0, 0, 3)
+    End Function
+
+    ''' <summary>
+    ''' render one package version and write its pages; with ``reindex`` the xml
+    ''' comment documents are extracted from the stored nupkg again and the
+    ''' database rows are replaced first (the same step the daemon performs after
+    ''' an upload).
+    ''' </summary>
+    ''' <param name="docConfig"></param>
+    ''' <param name="target"></param>
+    ''' <param name="reindex"></param>
+    ''' <param name="pages">the number of the written pages.</param>
+    Private Function buildDocTarget(docConfig As NugetConfiguration, target As DocTarget,
+                                    reindex As Boolean, ByRef pages As Integer) As DocBuildResult
+
+        Dim rows As List(Of PackageApiDocRecord)
+
+        If reindex Then
+            Dim nupkg As String = nupkgFile(target.package_id, target.version)
+
+            If Not File.Exists(nupkg) Then
+                Call Console.WriteLine($"    the package file was not found: {nupkg}")
+                Return DocBuildResult.Failed
+            End If
+
+            Dim warnings As New List(Of String)
+            Dim document As Readership.ApiDocDocument = PackageApiDocs.ExtractInProcess(nupkg, warnings)
+
+            For Each message As String In warnings
+                Call Console.WriteLine($"    warning: {message}")
+            Next
+
+            If document Is Nothing Then
+                Call Console.WriteLine("    the xml comment documents could not be extracted")
+                Return DocBuildResult.Failed
+            End If
+
+            rows = PackageApiDocs.ToRecords(document, target.package_id, target.version)
+            Call store.ReplacePackageApiDocs(target.package_id, target.version, rows)
+        Else
+            rows = store.ReadPackageApiDocs(target.package_id, target.version)
+        End If
+
+        If rows.Count = 0 Then
+            Call DocPageCache.RemoveVersion(docConfig, target.package_id, target.version)
+            Return DocBuildResult.Removed
+        End If
+
+        Dim versions As List(Of String) = store.GetPackageApiDocVersions(target.package_id)
+
+        pages = DocPageCache.WritePackageVersion(docConfig, target.package_id, target.version, rows, versions)
+
+        Return DocBuildResult.Built
+    End Function
+
+    ''' <summary>
+    ''' rebuild the cross package ``docs/index.html`` from the stored type index
+    ''' rows.
+    ''' </summary>
+    Private Function rebuildGlobalDocIndex(docConfig As NugetConfiguration) As Boolean
+        Dim written As Boolean = DocPageCache.WriteGlobalIndex(docConfig, store.ReadApiDocIndex())
+
+        Call Console.WriteLine($"  global index: {DocPageCache.GlobalIndexFilePath(docConfig)} (written={written})")
+
+        Return written
+    End Function
+
+    ''' <summary>
+    ''' collect the package versions which have api documents, optionally limited
+    ''' to one package id and one version. one single index read is enough.
+    ''' </summary>
+    Private Function docTargets(all As Boolean, packageId As String, version As String) As List(Of DocTarget)
+        Dim groups As New Dictionary(Of String, DocTarget)(StringComparer.OrdinalIgnoreCase)
+
+        For Each row As PackageApiDocRecord In store.ReadApiDocIndex()
+            If row Is Nothing OrElse String.IsNullOrEmpty(row.package_id) OrElse String.IsNullOrEmpty(row.version) Then
+                Continue For
+            End If
+
+            If Not all Then
+                If Not row.package_id.Equals(packageId, StringComparison.OrdinalIgnoreCase) Then
+                    Continue For
+                End If
+
+                If Not String.IsNullOrEmpty(version) AndAlso
+                   Not row.version.Equals(version, StringComparison.OrdinalIgnoreCase) Then
+                    Continue For
+                End If
+            End If
+
+            Dim key As String = row.package_id.ToLowerInvariant() & "|" & row.version.ToLowerInvariant()
+            Dim target As DocTarget = Nothing
+
+            If Not groups.TryGetValue(key, target) Then
+                target = New DocTarget With {
+                    .package_id = row.package_id,
+                    .version = row.version
+                }
+
+                groups(key) = target
+            End If
+
+            If Not String.IsNullOrEmpty(row.type_fullname) Then
+                Call target.types.Add(row.type_fullname)
+            End If
+        Next
+
+        Return groups.Values _
+            .OrderBy(Function(t) t.package_id, StringComparer.OrdinalIgnoreCase) _
+            .ThenBy(Function(t) t.version, StringComparer.OrdinalIgnoreCase) _
+            .ToList()
+    End Function
+
+    ''' <summary>
+    ''' the document configuration of the console: the web root and the template
+    ''' folder default to the folders next to the ``--data`` directory, exactly
+    ''' like the deployment layout of the server.
+    ''' </summary>
+    Private Function docsConfiguration(options As Dictionary(Of String, String)) As NugetConfiguration
+        Dim parent As String = Path.GetDirectoryName(Path.GetFullPath(config.DataDirectory))
+        Dim wwwroot As String = getOption(options, "wwwroot", "w")
+        Dim template As String = getOption(options, "template")
+
+        If String.IsNullOrEmpty(wwwroot) Then
+            wwwroot = Path.Combine(parent, "wwwroot")
+        End If
+
+        If String.IsNullOrEmpty(template) Then
+            template = Path.Combine(parent, "template")
+        End If
+
+        Return NugetConfiguration.FromConfig(New Dictionary(Of String, String) From {
+            {"db", config.DatabaseDirectory},
+            {"packages", config.PackageDirectory},
+            {"wwwroot", wwwroot},
+            {"template", template},
+            {"sitemap-enabled", "false"},
+            {"cluster-enabled", "false"},
+            {"apidoc-worker-enabled", "false"}
+        })
+    End Function
+
+    ''' <summary>
+    ''' the physical nupkg path of one package version, using the flat container
+    ''' layout of the server (``{packages}/{id}/{version}/{id}.{version}.nupkg``).
+    ''' </summary>
+    Private Function nupkgFile(packageId As String, version As String) As String
+        Dim id As String = If(packageId, "").ToLowerInvariant()
+        Dim ver As String = If(version, "").ToLowerInvariant()
+
+        Return Path.Combine(config.PackageDirectory, id, ver, $"{id}.{ver}.nupkg")
+    End Function
+
+    Private Sub printDocsUsage()
+        Call Console.WriteLine("usage: xConsole docs build <package-id> [version] [--reindex] [--wwwroot <dir>] [--template <dir>]")
+        Call Console.WriteLine("       xConsole docs build --all [--reindex] [--wwwroot <dir>] [--template <dir>]")
+    End Sub
 
 #End Region
 
