@@ -1,5 +1,6 @@
 Imports System.Diagnostics
 Imports System.IO
+Imports System.Runtime.InteropServices
 Imports System.Text.Json
 Imports Readership
 
@@ -69,10 +70,22 @@ Public Module PackageApiDocs
         Dim dll As String = Path.Combine(AppContext.BaseDirectory, "ApiDocWorker.dll")
         Dim psi As ProcessStartInfo
 
-        If File.Exists(exe) Then
+        ' the windows app host (*.exe) can not be executed on linux, while the
+        ' build output is usually copied as is from a windows machine into the
+        ' container: on every other platform the portable "dotnet ApiDocWorker.dll"
+        ' launch is preferred. the dll path becomes a part of the argument list,
+        ' so it is kept in a separate prefix variable.
+        Dim preferExe As Boolean = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+        Dim prefix As String = ""
+
+        If preferExe AndAlso File.Exists(exe) Then
             psi = New ProcessStartInfo(exe)
         ElseIf File.Exists(dll) Then
-            psi = New ProcessStartInfo("dotnet", $"""{dll}""")
+            psi = New ProcessStartInfo("dotnet")
+            prefix = $"""{dll}"" "
+        ElseIf File.Exists(exe) Then
+            ' last resort: a custom deployment could still provide a usable host
+            psi = New ProcessStartInfo(exe)
         Else
             Call addWarning(warnings, "the ApiDocWorker executable was not found next to the server, " &
                                       "the api document extraction runs inside the server process")
@@ -82,7 +95,7 @@ Public Module PackageApiDocs
         Dim outputFile As String = Path.Combine(Path.GetTempPath(), "xdoc-apidoc-result-" & Guid.NewGuid().ToString("N") & ".json")
         Dim watch As Stopwatch = Stopwatch.StartNew()
 
-        psi.Arguments = $"--nupkg ""{nupkgPath}"" --output ""{outputFile}"""
+        psi.Arguments = prefix & $"--nupkg ""{nupkgPath}"" --output ""{outputFile}"""
         psi.UseShellExecute = False
         psi.CreateNoWindow = True
         psi.RedirectStandardOutput = True

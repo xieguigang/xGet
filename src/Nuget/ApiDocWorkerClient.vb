@@ -3,6 +3,7 @@ Imports System.Collections.Generic
 Imports System.Diagnostics
 Imports System.IO
 Imports System.Linq
+Imports System.Runtime.InteropServices
 Imports System.Text
 Imports System.Text.Json
 Imports System.Threading
@@ -229,12 +230,25 @@ Public Class ApiDocWorkerClient
         Dim psi As ProcessStartInfo
         Dim arguments As String
 
-        If Not String.IsNullOrEmpty(exe) AndAlso File.Exists(exe) Then
+        ' the windows app host (*.exe) can not be executed on linux, while the
+        ' build output is usually copied as is from a windows machine into the
+        ' container: on every other platform the portable "dotnet ApiDocWorker.dll"
+        ' launch is therefore preferred over the native app host.
+        Dim preferExe As Boolean = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+        Dim hasExe As Boolean = Not String.IsNullOrEmpty(exe) AndAlso File.Exists(exe)
+        Dim hasDll As Boolean = Not String.IsNullOrEmpty(dll) AndAlso File.Exists(dll)
+
+        If preferExe AndAlso hasExe Then
             psi = New ProcessStartInfo(exe)
             arguments = ""
-        ElseIf Not String.IsNullOrEmpty(dll) AndAlso File.Exists(dll) Then
+        ElseIf hasDll Then
             psi = New ProcessStartInfo("dotnet")
             arguments = $"""{dll}"""
+        ElseIf hasExe Then
+            ' last resort: this is not the expected platform of that host, but a
+            ' custom path could still point at a usable native executable
+            psi = New ProcessStartInfo(exe)
+            arguments = ""
         Else
             Dim message As String = "[apidoc-worker] the ApiDocWorker executable was not found next to the server, " &
                 "the api documents are extracted inside the server process"
